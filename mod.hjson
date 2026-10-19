@@ -1,0 +1,9 @@
+{
+    "name": "damage-numbers",
+    "displayName": "Damage Numbers",
+    "author": "Rain",
+    "description": "FLOATING TEXT DAMAGE BROOO!!!!!!",
+    "version": "1.0.6",
+    "minGameVersion": 160.5,
+    "main": "damage_numbers.DamageNumbersMod"
+}

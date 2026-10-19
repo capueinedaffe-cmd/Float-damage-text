@@ -1,0 +1,667 @@
+package damage_numbers;
+
+import arc.Core;
+import arc.Events;
+import arc.func.Cons;
+import arc.graphics.Color;
+import arc.graphics.g2d.Draw;
+import arc.graphics.g2d.Font;
+import arc.graphics.g2d.GlyphLayout;
+import arc.graphics.g2d.TextureRegion;
+import arc.math.Mathf;
+import arc.scene.ui.layout.Scl;
+import arc.struct.IntSet;
+import arc.struct.LongMap;
+import arc.struct.Seq;
+import arc.util.Log;
+import arc.util.Time;
+import arc.util.pooling.Pools;
+import arc.util.serialization.Jval;
+import mindustry.Vars;
+import mindustry.content.StatusEffects;
+import mindustry.entities.Damage;
+import mindustry.entities.bullet.BulletType;
+import mindustry.game.EventType;
+import mindustry.game.Team;
+import mindustry.gen.Building;
+import mindustry.gen.Bullet;
+import mindustry.gen.Groups;
+import mindustry.gen.Unit;
+import mindustry.gen.WorldLabel;
+import mindustry.mod.Mod;
+import mindustry.type.StatusEffect;
+import mindustry.ui.Fonts;
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.CheckSetting;
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.SliderSetting;
+
+import java.util.concurrent.ConcurrentHashMap;
+
+public class DamageNumbersMod extends Mod {
+
+    public DamageNumbersMod() {
+        Log.info("===== CONSTRUCTOR EJECUTADO =====");
+    }
+
+    private static final String MOD_NAME = "damage-numbers";
+
+    // flagOutline = 1 << 1 = 2 (valor tomado del codigo fuente de WorldLabelComp,
+    // escrito como literal para no depender de esa clase en tiempo de ejecucion)
+    private static final byte FLAG_OUTLINE = 2;
+
+    // --- Dano anulado: cuando el dano verdadero es 0 ---
+    private static final String NULLED_TEXT = "nulled";
+    private static final String NULLED_SPRITE = "nullDamage"; // assets/sprites/nullDamage.png
+
+    // --- Colores por defecto de los estados "solo efecto" (hex sin #) ---
+    private static final String DEFAULT_WET_COLOR = "4169e1";
+    private static final String DEFAULT_TARRED_COLOR = "6b6b6b"; // el real (313131) se pierde contra el contorno negro
+    private static final String DEFAULT_FREEZING_COLOR = "6ecdec";
+
+    // --- Ajustes del menu del juego (se guardan en Core.settings) ---
+    private static final String KEY_TEXT_SIZE = "damage-numbers-text-size";
+    private static final String KEY_TEXT_SPACING = "damage-numbers-text-spacing";
+    private static final String KEY_ICON_DISPLAY = "damage-numbers-icon-display";
+    private static final String KEY_DAMAGE_FUSION = "damage-numbers-damage-fusion";
+    private static final String KEY_STATUS_FUSION = "damage-numbers-status-fusion";
+
+    private static final int TEXT_SIZE_DEFAULT = 20, TEXT_SIZE_MIN = 1, TEXT_SIZE_MAX = 50;
+    private static final int TEXT_SPACING_DEFAULT = 3, TEXT_SPACING_MIN = 1, TEXT_SPACING_MAX = 20;
+
+    // Tipos de objetivo/estado para las claves de fusion
+    private static final int KIND_UNIT_DAMAGE = 1, KIND_BUILD_DAMAGE = 2, KIND_STATUS = 3;
+
+    // --- Configuracion de config.hjson (lo que NO esta en el menu) ---
+    private boolean showAllyUnitDamage = true;
+    private boolean showEnemyUnitDamage = true;
+    private boolean showAllyBuildingDamage = true;
+    private boolean showEnemyBuildingDamage = true;
+    private boolean showShieldNulled = true;
+    private float labelLifetimeTicks = 40f;
+    private float iconSize = 6f;
+    private float holdSeconds = 0.15f;
+    private float riseSpeed = 8f;
+    private String damageMode = "raw";
+
+    // Etiquetas de color (markup) para los estados de proyectiles de liquido
+    private String wetTag = "[#" + DEFAULT_WET_COLOR + "]";
+    private String tarredTag = "[#" + DEFAULT_TARRED_COLOR + "]";
+    private String freezingTag = "[#" + DEFAULT_FREEZING_COLOR + "]";
+
+    // --- Dano "true" (metodo hibrido) ---
+    // Golpes directos -> formula real del juego.
+    // Splash          -> diferencia de vida antes/despues del golpe.
+    private final ConcurrentHashMap<Integer, Float> unitHealthMemory = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, Float> buildHealthMemory = new ConcurrentHashMap<>();
+
+    private final ObjectMapCache spriteCache = new ObjectMapCache();
+
+    // --- Un texto flotante con su icono, que comparten un unico ciclo de animacion ---
+    private static class Popup {
+        WorldLabel label;
+        TextureRegion icon;          // null si no hay icono
+        float anchorX, anchorY;      // punto central imaginario
+        float textDx, iconDx;        // desplazamiento horizontal respecto al punto central
+        float age;                   // segundos desde que (re)empezo la animacion
+
+        // Datos de fusion
+        float sumRaw, sumTrue;       // dano acumulado (fusion de dano)
+        boolean hasKey;
+        long fusionKey;
+    }
+    private final Seq<Popup> popups = new Seq<>();
+
+    // Textos fusionables activos: clave = (objetivo, tipo, estado)
+    private final LongMap<Popup> fusionIndex = new LongMap<>();
+
+    // --- Seguimiento de proyectiles para detectar los absorbidos por escudos ---
+    private final Seq<Bullet> prevBullets = new Seq<>();
+    private final Seq<Bullet> curBullets = new Seq<>();
+    private final IntSet curBulletIds = new IntSet();
+    private final Cons<Bullet> bulletCollector = b -> {
+        if (b.type != null && b.type.absorbable) {
+            curBullets.add(b);
+            curBulletIds.add(b.id);
+        }
+    };
+
+    @Override
+    public void init() {
+        Log.info("==== INIT EJECUTANDO ====");
+
+        loadConfig();
+
+        // El menu se registra cuando el juego termino de cargar
+        Events.on(EventType.ClientLoadEvent.class, e -> addSettingsMenu());
+
+        Log.info("[Damage Numbers] Registrando eventos...");
+
+        // Al cargar un mapa nuevo todas las entidades desaparecen: reiniciamos el estado
+        Events.on(EventType.WorldLoadEvent.class, e -> {
+            popups.clear();
+            fusionIndex.clear();
+            prevBullets.clear();
+            unitHealthMemory.clear();
+            buildHealthMemory.clear();
+        });
+
+        Events.on(EventType.UnitDestroyEvent.class, e -> {
+            if (e.unit != null) unitHealthMemory.remove(e.unit.id);
+        });
+        Events.on(EventType.BlockDestroyEvent.class, e -> {
+            if (e.tile != null && e.tile.build != null) {
+                buildHealthMemory.remove(e.tile.build.id);
+            }
+        });
+
+        // --- Anima los textos (y sus iconos) cada frame ---
+        Events.run(EventType.Trigger.drawOver, () -> {
+            // En pausa todo se queda quieto, sin flotar ni desaparecer.
+            if (Vars.state.isPaused()) return;
+
+            float dt = Time.delta / 60f;
+
+            for (int i = popups.size - 1; i >= 0; i--) {
+                Popup p = popups.get(i);
+
+                p.age += dt;
+                if (p.age >= labelLifetimeTicks) {
+                    releasePopup(p);
+                    popups.remove(i);
+                    continue;
+                }
+
+                // Quieto durante holdSeconds, luego sube
+                float rise = Math.max(0f, p.age - holdSeconds) * riseSpeed;
+                p.label.x = p.anchorX + p.textDx;
+                p.label.y = p.anchorY + rise;
+
+                if (p.icon != null) {
+                    // Reset ANTES de dibujar: limpia cualquier "mixcol" (tinte de
+                    // destello) que haya dejado un efecto anterior en este frame.
+                    Draw.reset();
+                    Draw.color(Color.white);
+                    Draw.rect(p.icon, p.anchorX + p.iconDx, p.anchorY + rise, iconSize, iconSize);
+                    Draw.reset();
+                }
+            }
+        });
+
+        // --- Proyectiles absorbidos por escudos (ForceProjector, ForceFieldAbility, etc.) ---
+        // No existe un evento de "proyectil absorbido". Cada tick, justo despues de
+        // actualizar las entidades, comparamos los proyectiles del tick anterior con
+        // los actuales: los que desaparecieron y quedaron marcados como "absorbed"
+        // fueron detenidos por un escudo. El juego libera (y resetea) los objetos
+        // eliminados recien al inicio del SIGUIENTE tick, asi que aqui aun son legibles.
+        Events.run(EventType.Trigger.afterGameUpdate, () -> {
+            if (!showShieldNulled) return;
+
+            curBullets.clear();
+            curBulletIds.clear();
+            Groups.bullet.each(bulletCollector);
+
+            for (int i = 0; i < prevBullets.size; i++) {
+                Bullet b = prevBullets.get(i);
+                if (b.absorbed && !curBulletIds.contains(b.id)) onBulletAbsorbed(b);
+            }
+
+            prevBullets.clear();
+            prevBullets.addAll(curBullets);
+        });
+
+        // --- Dano a unidades ---
+        Events.on(EventType.UnitDamageEvent.class, e -> {
+            if (e.bullet == null || e.unit == null) return;
+            BulletType type = e.bullet.type;
+            float rawDamage = e.bullet.damage;
+
+            // Proyectiles de liquido (mojado/alquitranado/congelante) sin dano real:
+            // lo que importa es el estado, no el numero.
+            boolean statusOnly = isStatusOnlyType(type) && Math.round(rawDamage) <= 0;
+            if (rawDamage <= 0 && !statusOnly) return;
+
+            Unit unit = e.unit;
+            int id = unit.id;
+            boolean isSplash = type.splashDamage > 0;
+
+            // Siempre actualizamos la memoria de vida (la usa el splash).
+            Float prevHealthObj = unitHealthMemory.get(id);
+            float prevHealth = (prevHealthObj != null) ? prevHealthObj : unit.health + rawDamage;
+            float diffDamage = Math.max(prevHealth - unit.health, 0);
+            unitHealthMemory.put(id, unit.health);
+
+            float trueDamage = isSplash ? diffDamage : computeFormulaTrueDamageUnit(unit, e.bullet);
+
+            Team playerTeam = Vars.player != null ? Vars.player.team() : null;
+            boolean isAlly = playerTeam != null && playerTeam == unit.team;
+
+            if (isAlly && !showAllyUnitDamage) return;
+            if (!isAlly && !showEnemyUnitDamage) return;
+
+            float x = unit.x, y = unit.y + unit.hitSize / 2f;
+
+            if (statusOnly) {
+                showStatus(unit.id, type.status, x, y);
+            } else {
+                showDamage(unit.id, KIND_UNIT_DAMAGE, rawDamage, trueDamage, isAlly, type, x, y);
+            }
+        });
+
+        // --- Dano a edificios ---
+        // (Las estructuras no reciben estados alterados, asi que aqui no hay modo "solo estado".)
+        Events.on(EventType.BuildDamageEvent.class, e -> {
+            if (e.source == null || e.build == null) return;
+            float rawDamage = e.source.damage;
+            if (rawDamage <= 0) return;
+
+            Building build = e.build;
+            int id = build.id;
+            boolean isSplash = e.source.type.splashDamage > 0;
+
+            Float prevHealthObj = buildHealthMemory.get(id);
+            float prevHealth = (prevHealthObj != null) ? prevHealthObj : build.health + rawDamage;
+            float diffDamage = Math.max(prevHealth - build.health, 0);
+            buildHealthMemory.put(id, build.health);
+
+            float trueDamage = isSplash ? diffDamage : computeFormulaTrueDamageBuilding(build, e.source);
+
+            Team playerTeam = Vars.player != null ? Vars.player.team() : null;
+            boolean isAlly = playerTeam != null && playerTeam == build.team;
+
+            if (isAlly && !showAllyBuildingDamage) return;
+            if (!isAlly && !showEnemyBuildingDamage) return;
+
+            showDamage(build.id, KIND_BUILD_DAMAGE, rawDamage, trueDamage, isAlly, e.source.type, build.x, build.y);
+        });
+
+        Log.info("[Damage Numbers] Mod cargado correctamente!");
+    }
+
+    // =====================================================================
+    //  Menu de ajustes (en ingles)
+    // =====================================================================
+
+    private void addSettingsMenu() {
+        try {
+            Vars.ui.settings.addCategory("Damage Numbers", table -> {
+                table.pref(slider(KEY_TEXT_SIZE, TEXT_SIZE_DEFAULT, TEXT_SIZE_MIN, TEXT_SIZE_MAX,
+                        "Text size", "Size of the floating damage text."));
+                table.pref(slider(KEY_TEXT_SPACING, TEXT_SPACING_DEFAULT, TEXT_SPACING_MIN, TEXT_SPACING_MAX,
+                        "Text spacing", "Distance between the damage type icon and the text."));
+                table.pref(check(KEY_ICON_DISPLAY, true,
+                        "Icon display", "Show the damage type icon next to the text."));
+                table.pref(check(KEY_DAMAGE_FUSION, false,
+                        "Damage text fusion", "Continuous damage on the same target is added into a single text, and its animation restarts with every new hit."));
+                table.pref(check(KEY_STATUS_FUSION, true,
+                        "Status text fusion", "A status text (wet, freezing, tarred) plays its animation once per target and only appears again after the animation ends."));
+            });
+        } catch (Exception ex) {
+            Log.err("[Damage Numbers] No se pudo crear el menu de ajustes: " + ex.getMessage());
+        }
+    }
+
+    private SliderSetting slider(String key, int def, int min, int max, String title, String description) {
+        Core.settings.defaults(key, def);
+        SliderSetting s = new SliderSetting(key, def, min, max, 1, i -> String.valueOf(i), null);
+        s.title = title;
+        s.description = description;
+        return s;
+    }
+
+    private CheckSetting check(String key, boolean def, String title, String description) {
+        Core.settings.defaults(key, def);
+        CheckSetting s = new CheckSetting(key, def, null);
+        s.title = title;
+        s.description = description;
+        return s;
+    }
+
+    // Los valores se leen en cada golpe, asi los cambios del menu aplican al instante.
+    private float fontSize() {
+        int v = Mathf.clamp(Core.settings.getInt(KEY_TEXT_SIZE, TEXT_SIZE_DEFAULT), TEXT_SIZE_MIN, TEXT_SIZE_MAX);
+        return v / 10f; // 20 = tamano 2.0
+    }
+
+    // "Text spacing" es la separacion TOTAL entre icono y texto; cada lado recibe la mitad.
+    private float halfSpacing() {
+        int v = Mathf.clamp(Core.settings.getInt(KEY_TEXT_SPACING, TEXT_SPACING_DEFAULT), TEXT_SPACING_MIN, TEXT_SPACING_MAX);
+        return v / 2f;
+    }
+
+    private boolean iconDisplay() {
+        return Core.settings.getBool(KEY_ICON_DISPLAY, true);
+    }
+
+    private boolean damageFusion() {
+        return Core.settings.getBool(KEY_DAMAGE_FUSION, false);
+    }
+
+    private boolean statusFusion() {
+        return Core.settings.getBool(KEY_STATUS_FUSION, true);
+    }
+
+    // =====================================================================
+    //  Mostrar textos (con fusion opcional)
+    // =====================================================================
+
+    private static long fusionKey(int targetId, int kind, int statusId) {
+        return ((long) targetId << 24) | ((long) kind << 16) | (statusId & 0xFFFF);
+    }
+
+    // Dano numerico. Con "Damage text fusion" el dano continuo sobre el mismo objetivo
+    // se suma en un solo texto y la animacion se reinicia en cada golpe nuevo.
+    // Un golpe anulado ("nulled") nunca se fusiona.
+    private void showDamage(int targetId, int kind, float raw, float trueDamage, boolean isAlly,
+                            BulletType type, float x, float y) {
+        boolean nulledHit = !damageMode.equals("raw") && isNulled(trueDamage);
+
+        if (damageFusion() && !nulledHit) {
+            long key = fusionKey(targetId, kind, 0);
+            Popup existing = fusionIndex.get(key);
+
+            if (existing != null) {
+                existing.sumRaw += raw;
+                existing.sumTrue += trueDamage;
+                String text = formatDamageText(existing.sumRaw, existing.sumTrue);
+                layoutPopup(existing, teamTag(isAlly) + text + "[]", pickIcon(type, existing.sumTrue), x, y);
+                return;
+            }
+
+            Popup created = spawnPair(teamTag(isAlly) + formatDamageText(raw, trueDamage) + "[]",
+                    pickIcon(type, trueDamage), x, y);
+            created.sumRaw = raw;
+            created.sumTrue = trueDamage;
+            created.hasKey = true;
+            created.fusionKey = key;
+            fusionIndex.put(key, created);
+            return;
+        }
+
+        spawnPair(teamTag(isAlly) + formatDamageText(raw, trueDamage) + "[]", pickIcon(type, trueDamage), x, y);
+    }
+
+    // Texto de estado (mojado/alquitranado/congelante). Con "Status text fusion" un
+    // texto activo del mismo estado sobre el mismo objetivo sigue su unica animacion
+    // y los golpes nuevos no crean otro; vuelve a aparecer cuando termina.
+    private void showStatus(int targetId, StatusEffect status, float x, float y) {
+        boolean fuse = statusFusion();
+        long key = fusionKey(targetId, KIND_STATUS, status.id);
+
+        if (fuse && fusionIndex.containsKey(key)) return;
+
+        Popup created = spawnPair(statusText(status), status.uiIcon, x, y);
+        if (fuse) {
+            created.hasKey = true;
+            created.fusionKey = key;
+            fusionIndex.put(key, created);
+        }
+    }
+
+    // Un proyectil fue absorbido por un escudo: mostramos "nulled" donde se detuvo
+    private void onBulletAbsorbed(Bullet b) {
+        Team playerTeam = Vars.player != null ? Vars.player.team() : null;
+        // El escudo pertenece al equipo contrario al del proyectil. Si el proyectil
+        // no es nuestro, el escudo que lo detuvo es nuestro (aliado).
+        boolean isAlly = playerTeam != null && b.team != playerTeam;
+
+        spawnPair(teamTag(isAlly) + NULLED_TEXT + "[]", getCustomSprite(NULLED_SPRITE), b.x, b.y);
+    }
+
+    // =====================================================================
+    //  Popups: texto + icono alrededor de un punto central imaginario
+    // =====================================================================
+
+    // Crea un texto nuevo con su icono. Icono a la izquierda del punto central, texto
+    // a la derecha, con la misma separacion sin importar cuantos caracteres tenga.
+    private Popup spawnPair(String markup, TextureRegion icon, float anchorX, float anchorY) {
+        Popup p = new Popup();
+        p.label = WorldLabel.create();
+        p.label.flags = FLAG_OUTLINE;
+        layoutPopup(p, markup, icon, anchorX, anchorY);
+        p.label.add();
+        popups.add(p);
+        return p;
+    }
+
+    // Coloca (o recoloca) un popup y reinicia su animacion.
+    private void layoutPopup(Popup p, String markup, TextureRegion icon, float anchorX, float anchorY) {
+        float size = fontSize();
+
+        p.icon = iconDisplay() ? icon : null;
+        p.anchorX = anchorX;
+        p.anchorY = anchorY;
+        p.age = 0f;
+
+        if (p.icon != null) {
+            float gap = halfSpacing();
+            p.textDx = gap + measureTextWidth(markup, size) / 2f;
+            p.iconDx = -gap - iconSize / 2f;
+        } else {
+            p.textDx = 0f;
+            p.iconDx = 0f;
+        }
+
+        p.label.text = markup;
+        p.label.fontSize = size;
+        p.label.x = anchorX + p.textDx;
+        p.label.y = anchorY;
+        // Red de seguridad: normalmente lo cerramos nosotros antes (ver releasePopup)
+        p.label.duration = labelLifetimeTicks + 2f;
+    }
+
+    // Termina un popup: lo saca del indice de fusion y cierra su texto.
+    // WorldLabel debe cerrarse con hide(), no con remove().
+    private void releasePopup(Popup p) {
+        if (p.hasKey && fusionIndex.get(p.fusionKey) == p) fusionIndex.remove(p.fusionKey);
+        p.label.hide();
+    }
+
+    // Mide el ancho que tendra el texto en el mundo. Replica el calculo de
+    // WorldLabelComp.drawAt (misma fuente y misma escala).
+    private float measureTextWidth(String markupText, float size) {
+        Font font = Fonts.outline;
+        GlyphLayout layout = Pools.obtain(GlyphLayout.class, GlyphLayout::new);
+
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * size / Scl.scl(1f));
+        layout.setText(font, markupText);
+        float width = layout.width;
+
+        Pools.free(layout);
+        font.getData().setScale(1f);
+        font.setUseIntegerPositions(ints);
+        return width;
+    }
+
+    // =====================================================================
+    //  Calculo de dano verdadero
+    // =====================================================================
+
+    // --- Formula real de dano "true" para unidades (ShieldComp.damage/damageArmorMult) ---
+    private float computeFormulaTrueDamageUnit(Unit unit, Bullet bullet) {
+        BulletType type = bullet.type;
+
+        if (!unit.type.killable) return 0f;
+
+        float afterArmor;
+        if (type.pierceArmor) {
+            afterArmor = bullet.damage;
+        } else {
+            float effectiveArmor = unit.armorOverride >= 0 ? unit.armorOverride : unit.armor;
+            if (type.armorMultiplier != 1) effectiveArmor *= type.armorMultiplier;
+            afterArmor = Damage.applyArmor(bullet.damage, effectiveArmor);
+        }
+
+        afterArmor = afterArmor / unit.healthMultiplier / Vars.state.rules.unitHealth(unit.team);
+
+        float shieldAbsorbed = Math.min(Math.max(unit.shield, 0), afterArmor);
+        return Math.max(afterArmor - shieldAbsorbed, 0);
+    }
+
+    // --- Formula real de dano "true" para estructuras (BuildingComp.collision) ---
+    private float computeFormulaTrueDamageBuilding(Building build, Bullet bullet) {
+        BulletType type = bullet.type;
+        float rawForBuilding = bullet.damage * bullet.buildingDamageMultiplier;
+
+        if (type.pierceArmor) return rawForBuilding;
+
+        float effectiveArmor = build.block.armor * type.armorMultiplier * type.blockArmorMultiplier;
+        return Math.max(Damage.applyArmor(rawForBuilding, effectiveArmor), 0);
+    }
+
+    // =====================================================================
+    //  Estados, iconos y formato de texto
+    // =====================================================================
+
+    // --- Estados "solo efecto" (proyectiles de liquido) ---
+    private boolean isStatusOnlyType(BulletType type) {
+        return type != null && (type.status == StatusEffects.wet
+                || type.status == StatusEffects.tarred
+                || type.status == StatusEffects.freezing);
+    }
+
+    // Nombre del estado (traducido por el juego) con el color configurado
+    private String statusText(StatusEffect status) {
+        String tag = status == StatusEffects.wet ? wetTag
+                : status == StatusEffects.tarred ? tarredTag
+                : freezingTag;
+        return tag + status.localizedName + "[]";
+    }
+
+    // Convierte un hex ("4169e1" o "#4169e1") en una etiqueta de color; si es invalido usa el de respaldo
+    private String colorTag(String hex, String fallbackHex) {
+        try {
+            Color c = Color.valueOf(hex);
+            return "[#" + c.toString().substring(0, 6) + "]";
+        } catch (Exception ex) {
+            Log.warn("[Damage Numbers] Color invalido '" + hex + "', usando " + fallbackHex);
+            return "[#" + fallbackHex + "]";
+        }
+    }
+
+    // --- Clasifica el tipo de dano y devuelve el icono a dibujar (o null si no hay) ---
+    private TextureRegion iconFor(BulletType type) {
+        if (type == null) return null;
+
+        boolean isElectric = type.status == StatusEffects.shocked
+                || type.status == StatusEffects.electrified
+                || type.lightningDamage >= 0;
+        if (isElectric) return StatusEffects.shocked.uiIcon;
+
+        if (type.status == StatusEffects.freezing) return StatusEffects.freezing.uiIcon;
+
+        boolean isFire = type.status == StatusEffects.burning || type.makeFire;
+        if (isFire) return StatusEffects.burning.uiIcon;
+
+        if (type.status == StatusEffects.blasted) return StatusEffects.blasted.uiIcon;
+        if (type.status == StatusEffects.corroded) return StatusEffects.corroded.uiIcon;
+        if (type.status == StatusEffects.melting) return StatusEffects.melting.uiIcon;
+        if (type.status == StatusEffects.wet) return StatusEffects.wet.uiIcon;
+
+        if (type.splashDamage > 0) return getCustomSprite("icon-splash");
+
+        return getCustomSprite("icon-kinetic");
+    }
+
+    // El dano verdadero cuenta como "anulado" si se muestra como 0 (ya redondeado).
+    private boolean isNulled(float trueDamage) {
+        return Math.round(trueDamage) <= 0;
+    }
+
+    // En modo "raw" se muestra el dano crudo, asi que ahi nunca aplica "nulled".
+    private TextureRegion pickIcon(BulletType type, float trueDamage) {
+        if (!damageMode.equals("raw") && isNulled(trueDamage)) {
+            TextureRegion nullIcon = getCustomSprite(NULLED_SPRITE);
+            if (nullIcon != null) return nullIcon;
+            // Si todavia no agregaste nullDamage.png, usamos el icono normal.
+        }
+        return iconFor(type);
+    }
+
+    private TextureRegion getCustomSprite(String name) {
+        String fullName = MOD_NAME + "-" + name;
+        return spriteCache.get(fullName, () -> {
+            if (!Core.atlas.has(fullName)) {
+                Log.warn("[Damage Numbers] No se encontro el sprite '" + fullName
+                        + "'. Coloca el archivo en assets/sprites/" + name + ".png");
+                return null;
+            }
+            return Core.atlas.find(fullName);
+        });
+    }
+
+    private String teamTag(boolean isAlly) {
+        return isAlly ? "[scarlet]" : "[white]";
+    }
+
+    private String formatDamageText(float raw, float trueDamage) {
+        String rawStr = String.valueOf(Math.round(raw));
+        String trueStr = isNulled(trueDamage) ? NULLED_TEXT : String.valueOf(Math.round(trueDamage));
+        switch (damageMode) {
+            case "raw": return rawStr;
+            case "true": return trueStr;
+            default: return rawStr + "(" + trueStr + ")";
+        }
+    }
+
+    // =====================================================================
+    //  config.hjson
+    // =====================================================================
+
+    private void loadConfig() {
+        try {
+            var mod = Vars.mods.getMod(MOD_NAME);
+            if (mod == null) {
+                Log.warn("[Damage Numbers] Mod no encontrado, usando valores por defecto");
+                return;
+            }
+
+            var configFile = mod.root.child("config.hjson");
+            if (!configFile.exists()) {
+                Log.warn("[Damage Numbers] config.hjson no encontrado, usando valores por defecto");
+                return;
+            }
+
+            Jval json = Jval.read(configFile.readString());
+
+            showAllyUnitDamage = json.getBool("showAllyUnitDamage", showAllyUnitDamage);
+            showEnemyUnitDamage = json.getBool("showEnemyUnitDamage", showEnemyUnitDamage);
+            showAllyBuildingDamage = json.getBool("showAllyBuildingDamage", showAllyBuildingDamage);
+            showEnemyBuildingDamage = json.getBool("showEnemyBuildingDamage", showEnemyBuildingDamage);
+            showShieldNulled = json.getBool("showShieldNulled", showShieldNulled);
+            labelLifetimeTicks = json.getFloat("labelLifetimeTicks", labelLifetimeTicks);
+            iconSize = json.getFloat("iconSize", iconSize);
+            holdSeconds = json.getFloat("holdSeconds", holdSeconds);
+            riseSpeed = json.getFloat("riseSpeed", riseSpeed);
+
+            wetTag = colorTag(json.getString("wetColor", DEFAULT_WET_COLOR), DEFAULT_WET_COLOR);
+            tarredTag = colorTag(json.getString("tarredColor", DEFAULT_TARRED_COLOR), DEFAULT_TARRED_COLOR);
+            freezingTag = colorTag(json.getString("freezingColor", DEFAULT_FREEZING_COLOR), DEFAULT_FREEZING_COLOR);
+
+            String mode = json.getString("damageMode", damageMode);
+            if (mode.equals("raw") || mode.equals("true") || mode.equals("both")) {
+                damageMode = mode;
+            } else {
+                Log.warn("[Damage Numbers] damageMode invalido: " + mode + ", usando 'raw'");
+            }
+
+            Log.info("[Damage Numbers] Configuracion cargada correctamente");
+        } catch (Exception e) {
+            Log.err("[Damage Numbers] Error al cargar config.hjson: " + e.getMessage());
+            Log.err("[Damage Numbers] Usando valores por defecto");
+        }
+    }
+
+    private static class ObjectMapCache {
+        private final ConcurrentHashMap<String, TextureRegion> cache = new ConcurrentHashMap<>();
+        private final ConcurrentHashMap<String, Boolean> resolved = new ConcurrentHashMap<>();
+
+        TextureRegion get(String key, java.util.function.Supplier<TextureRegion> loader) {
+            if (resolved.containsKey(key)) return cache.get(key);
+            TextureRegion region = loader.get();
+            if (region != null) cache.put(key, region);
+            resolved.put(key, true);
+            return region;
+        }
+    }
+}

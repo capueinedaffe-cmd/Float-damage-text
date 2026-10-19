@@ -1,0 +1,16 @@
+{
+    "showAllyUnitDamage": true,
+    "showEnemyUnitDamage": true,
+    "showAllyBuildingDamage": true,
+    "showEnemyBuildingDamage": true,
+    "labelLifetimeTicks": 1,
+    "iconSize": 8,
+    "fontSize": 2,
+    "holdSeconds": 0.15,
+    "riseSpeed": 8,
+    "damageMode": "true",
+    "wetColor": "5D7BD6",
+    "tarredColor": "434343",
+    "freezingColor": "7CC8D7",
+    "iconTextGap": 1.5
+}
