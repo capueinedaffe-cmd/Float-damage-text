@@ -710,7 +710,7 @@ public class DamageNumbersMod extends Mod {
     }
 
     private String teamTag(boolean isAlly) {
-        return isAlly ? "[CE4343]" : "[white]";
+        return isAlly ? "[#CE4343]" : "[white]";
     }
 
     private String formatDamageText(float raw, float trueDamage) {
