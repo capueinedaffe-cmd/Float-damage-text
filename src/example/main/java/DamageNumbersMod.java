@@ -11,6 +11,8 @@ import arc.graphics.g2d.TextureRegion;
 import arc.math.Mathf;
 import arc.scene.style.Drawable;
 import arc.scene.style.TextureRegionDrawable;
+import arc.scene.ui.ButtonGroup;
+import arc.scene.ui.TextButton;
 import arc.scene.ui.layout.Scl;
 import arc.struct.IntSet;
 import arc.struct.LongMap;
@@ -30,10 +32,14 @@ import mindustry.gen.Bullet;
 import mindustry.gen.Groups;
 import mindustry.gen.Unit;
 import mindustry.gen.WorldLabel;
+import mindustry.graphics.Pal;
 import mindustry.mod.Mod;
 import mindustry.type.StatusEffect;
 import mindustry.ui.Fonts;
+import mindustry.ui.Styles;
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.CheckSetting;
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.Setting;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.SliderSetting;
 
 import java.util.concurrent.ConcurrentHashMap;
@@ -66,6 +72,8 @@ public class DamageNumbersMod extends Mod {
     private static final String KEY_DAMAGE_FUSION = "damage-numbers-damage-fusion";
     private static final String KEY_STATUS_FUSION = "damage-numbers-status-fusion";
     private static final String KEY_STATUS_FLOOD = "damage-numbers-status-flood";
+    private static final String KEY_DAMAGE_TYPE = "damage-numbers-damage-type"; // "raw" | "true" | "both"
+    private static final String DAMAGE_TYPE_DEFAULT = "raw";
 
     private static final int TEXT_SIZE_DEFAULT = 20, TEXT_SIZE_MIN = 1, TEXT_SIZE_MAX = 50;
     private static final int ICON_SPACING_DEFAULT = 3, ICON_SPACING_MIN = 1, ICON_SPACING_MAX = 20;
@@ -87,7 +95,6 @@ public class DamageNumbersMod extends Mod {
     private float iconSize = 6f;
     private float holdSeconds = 0.15f;
     private float riseSpeed = 8f;
-    private String damageMode = "raw";
 
     // Etiquetas de color (markup) para los estados de proyectiles de liquido
     private String wetTag = "[#" + DEFAULT_WET_COLOR + "]";
@@ -308,6 +315,7 @@ public class DamageNumbersMod extends Mod {
             Drawable categoryIcon = iconRegion == null ? null : new TextureRegionDrawable(iconRegion);
 
             Vars.ui.settings.addCategory("Damage Numbers", categoryIcon, table -> {
+                table.pref(damageTypeSetting());
                 table.pref(slider(KEY_TEXT_SIZE, TEXT_SIZE_DEFAULT, TEXT_SIZE_MIN, TEXT_SIZE_MAX,
                         "Text size", "Size of the floating damage text."));
                 table.pref(slider(KEY_ICON_SPACING, ICON_SPACING_DEFAULT, ICON_SPACING_MIN, ICON_SPACING_MAX,
@@ -324,6 +332,53 @@ public class DamageNumbersMod extends Mod {
         } catch (Exception ex) {
             Log.err("[Damage Numbers] No se pudo crear el menu de ajustes: " + ex.getMessage());
         }
+    }
+
+    // Tipo de dano que se muestra: "raw" (crudo), "true" (verdadero) o "both" (ambos).
+    // Se lee en cada golpe, asi el cambio del menu aplica al instante.
+    private String damageMode() {
+        String v = Core.settings.getString(KEY_DAMAGE_TYPE, DAMAGE_TYPE_DEFAULT);
+        return (v.equals("raw") || v.equals("true") || v.equals("both")) ? v : DAMAGE_TYPE_DEFAULT;
+    }
+
+    // Selector de tipo de dano: titulo con icono, fila con botones Raw / True / Both y descripcion.
+    private Setting damageTypeSetting() {
+        Core.settings.defaults(KEY_DAMAGE_TYPE, DAMAGE_TYPE_DEFAULT);
+
+        return new Setting(KEY_DAMAGE_TYPE) {
+            @Override
+            public void add(SettingsTable table) {
+                float width = Math.min(500f, Core.graphics.getWidth() / 1.2f / Scl.scl(1f));
+
+                // Titulo con el icono de dano cinetico (assets/sprites/icon-kinetic.png)
+                table.table(header -> {
+                    header.left();
+                    TextureRegion icon = getCustomSprite("icon-kinetic");
+                    if (icon != null) header.image(icon).size(28f).padRight(8f);
+                    header.add("Damage type").color(Pal.accent);
+                }).width(width).left().padTop(10f).row();
+
+                // Fila: nombre de la opcion + botones de seleccion
+                table.table(row -> {
+                    row.left();
+                    row.add("Damage type").left().growX();
+
+                    ButtonGroup<TextButton> group = new ButtonGroup<>();
+                    String[][] options = {{"Raw", "raw"}, {"True", "true"}, {"Both", "both"}};
+                    for (String[] option : options) {
+                        String value = option[1];
+                        row.button(option[0], Styles.flatTogglet, () -> Core.settings.put(KEY_DAMAGE_TYPE, value))
+                                .group(group)
+                                .checked(b -> damageMode().equals(value))
+                                .size(80f, 40f).padLeft(4f);
+                    }
+                }).width(width).left().padTop(4f).row();
+
+                // Descripcion
+                table.add("Raw: the projectile's base damage. True: the damage actually dealt after armor and shields. Both: shows the two values, like 50(30).")
+                        .wrap().width(width).left().color(Color.lightGray).padTop(4f).padBottom(6f).row();
+            }
+        };
     }
 
     private SliderSetting slider(String key, int def, int min, int max, String title, String description) {
@@ -383,7 +438,7 @@ public class DamageNumbersMod extends Mod {
     // Un golpe anulado ("nulled") nunca se fusiona.
     private void showDamage(int targetId, int kind, float raw, float trueDamage, boolean isAlly,
                             BulletType type, float x, float y) {
-        boolean nulledHit = !damageMode.equals("raw") && isNulled(trueDamage);
+        boolean nulledHit = !damageMode().equals("raw") && isNulled(trueDamage);
 
         if (damageFusion() && !nulledHit) {
             long key = fusionKey(targetId, kind, 0);
@@ -634,7 +689,7 @@ public class DamageNumbersMod extends Mod {
 
     // En modo "raw" se muestra el dano crudo, asi que ahi nunca aplica "nulled".
     private TextureRegion pickIcon(BulletType type, float trueDamage) {
-        if (!damageMode.equals("raw") && isNulled(trueDamage)) {
+        if (!damageMode().equals("raw") && isNulled(trueDamage)) {
             TextureRegion nullIcon = getCustomSprite(NULLED_SPRITE);
             if (nullIcon != null) return nullIcon;
             // Si todavia no agregaste nullDamage.png, usamos el icono normal.
@@ -655,13 +710,13 @@ public class DamageNumbersMod extends Mod {
     }
 
     private String teamTag(boolean isAlly) {
-        return isAlly ? "[scarlet]" : "[white]";
+        return isAlly ? "[CE4343]" : "[white]";
     }
 
     private String formatDamageText(float raw, float trueDamage) {
         String rawStr = String.valueOf(Math.round(raw));
         String trueStr = isNulled(trueDamage) ? NULLED_TEXT : String.valueOf(Math.round(trueDamage));
-        switch (damageMode) {
+        switch (damageMode()) {
             case "raw": return rawStr;
             case "true": return trueStr;
             default: return rawStr + "(" + trueStr + ")";
@@ -701,13 +756,6 @@ public class DamageNumbersMod extends Mod {
             wetTag = colorTag(json.getString("wetColor", DEFAULT_WET_COLOR), DEFAULT_WET_COLOR);
             tarredTag = colorTag(json.getString("tarredColor", DEFAULT_TARRED_COLOR), DEFAULT_TARRED_COLOR);
             freezingTag = colorTag(json.getString("freezingColor", DEFAULT_FREEZING_COLOR), DEFAULT_FREEZING_COLOR);
-
-            String mode = json.getString("damageMode", damageMode);
-            if (mode.equals("raw") || mode.equals("true") || mode.equals("both")) {
-                damageMode = mode;
-            } else {
-                Log.warn("[Damage Numbers] damageMode invalido: " + mode + ", usando 'raw'");
-            }
 
             Log.info("[Damage Numbers] Configuracion cargada correctamente");
         } catch (Exception e) {
