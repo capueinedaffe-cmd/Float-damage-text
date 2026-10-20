@@ -7,9 +7,7 @@ If you have any questions, suggestions, or have found a bug, you can visit my mo
 
 Thank you so much for reading and considering downloading my mod. ╰⁠(⁠⸝⁠⸝⁠⸝⁠´⁠꒳⁠`⁠⸝⁠⸝⁠⸝⁠)⁠╯
 
-`Mod Development` **Completed**
-
-`Updates` **Pending**
+`Mod Development & maintenance` Yes
 
 `Compatibility` **Desktop** and **Mobile** devices
 
