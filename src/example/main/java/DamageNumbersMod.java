@@ -9,6 +9,8 @@ import arc.graphics.g2d.Font;
 import arc.graphics.g2d.GlyphLayout;
 import arc.graphics.g2d.TextureRegion;
 import arc.math.Mathf;
+import arc.scene.style.Drawable;
+import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.layout.Scl;
 import arc.struct.IntSet;
 import arc.struct.LongMap;
@@ -59,13 +61,18 @@ public class DamageNumbersMod extends Mod {
 
     // --- Ajustes del menu del juego (se guardan en Core.settings) ---
     private static final String KEY_TEXT_SIZE = "damage-numbers-text-size";
-    private static final String KEY_TEXT_SPACING = "damage-numbers-text-spacing";
+    private static final String KEY_ICON_SPACING = "damage-numbers-icon-spacing";
     private static final String KEY_ICON_DISPLAY = "damage-numbers-icon-display";
     private static final String KEY_DAMAGE_FUSION = "damage-numbers-damage-fusion";
     private static final String KEY_STATUS_FUSION = "damage-numbers-status-fusion";
+    private static final String KEY_STATUS_FLOOD = "damage-numbers-status-flood";
 
     private static final int TEXT_SIZE_DEFAULT = 20, TEXT_SIZE_MIN = 1, TEXT_SIZE_MAX = 50;
-    private static final int TEXT_SPACING_DEFAULT = 3, TEXT_SPACING_MIN = 1, TEXT_SPACING_MAX = 20;
+    private static final int ICON_SPACING_DEFAULT = 3, ICON_SPACING_MIN = 1, ICON_SPACING_MAX = 20;
+
+    // Icono de la categoria en el menu: assets/sprites/damage-numbers-icon.png
+    // (el juego le antepone el nombre del mod, por eso el nombre final repite "damage-numbers")
+    private static final String CATEGORY_ICON_SPRITE = "damage-numbers-icon";
 
     // Tipos de objetivo/estado para las claves de fusion
     private static final int KIND_UNIT_DAMAGE = 1, KIND_BUILD_DAMAGE = 2, KIND_STATUS = 3;
@@ -113,6 +120,16 @@ public class DamageNumbersMod extends Mod {
     // Textos fusionables activos: clave = (objetivo, tipo, estado)
     private final LongMap<Popup> fusionIndex = new LongMap<>();
 
+    // --- "Status flood": estados que ya anunciamos y que la unidad todavia conserva ---
+    private static class StatusMark {
+        Unit unit;
+        int unitId;
+        StatusEffect status;
+        long key;
+    }
+    private final Seq<StatusMark> statusMarks = new Seq<>();
+    private final LongMap<StatusMark> statusMarkIndex = new LongMap<>();
+
     // --- Seguimiento de proyectiles para detectar los absorbidos por escudos ---
     private final Seq<Bullet> prevBullets = new Seq<>();
     private final Seq<Bullet> curBullets = new Seq<>();
@@ -139,6 +156,8 @@ public class DamageNumbersMod extends Mod {
         Events.on(EventType.WorldLoadEvent.class, e -> {
             popups.clear();
             fusionIndex.clear();
+            statusMarks.clear();
+            statusMarkIndex.clear();
             prevBullets.clear();
             unitHealthMemory.clear();
             buildHealthMemory.clear();
@@ -193,6 +212,8 @@ public class DamageNumbersMod extends Mod {
         // fueron detenidos por un escudo. El juego libera (y resetea) los objetos
         // eliminados recien al inicio del SIGUIENTE tick, asi que aqui aun son legibles.
         Events.run(EventType.Trigger.afterGameUpdate, () -> {
+            cleanStatusMarks();
+
             if (!showShieldNulled) return;
 
             curBullets.clear();
@@ -240,7 +261,7 @@ public class DamageNumbersMod extends Mod {
             float x = unit.x, y = unit.y + unit.hitSize / 2f;
 
             if (statusOnly) {
-                showStatus(unit.id, type.status, x, y);
+                showStatus(unit, type.status, x, y);
             } else {
                 showDamage(unit.id, KIND_UNIT_DAMAGE, rawDamage, trueDamage, isAlly, type, x, y);
             }
@@ -282,17 +303,23 @@ public class DamageNumbersMod extends Mod {
 
     private void addSettingsMenu() {
         try {
-            Vars.ui.settings.addCategory("Damage Numbers", table -> {
+            // Si todavia no existe damage-numbers-icon.png, la categoria sale sin icono.
+            TextureRegion iconRegion = getCustomSprite(CATEGORY_ICON_SPRITE);
+            Drawable categoryIcon = iconRegion == null ? null : new TextureRegionDrawable(iconRegion);
+
+            Vars.ui.settings.addCategory("Damage Numbers", categoryIcon, table -> {
                 table.pref(slider(KEY_TEXT_SIZE, TEXT_SIZE_DEFAULT, TEXT_SIZE_MIN, TEXT_SIZE_MAX,
                         "Text size", "Size of the floating damage text."));
-                table.pref(slider(KEY_TEXT_SPACING, TEXT_SPACING_DEFAULT, TEXT_SPACING_MIN, TEXT_SPACING_MAX,
-                        "Text spacing", "Distance between the damage type icon and the text."));
+                table.pref(slider(KEY_ICON_SPACING, ICON_SPACING_DEFAULT, ICON_SPACING_MIN, ICON_SPACING_MAX,
+                        "Icon spacing", "Increases or decreases the space between the text and the damage type icon."));
                 table.pref(check(KEY_ICON_DISPLAY, true,
                         "Icon display", "Show the damage type icon next to the text."));
                 table.pref(check(KEY_DAMAGE_FUSION, false,
                         "Damage text fusion", "Continuous damage on the same target is added into a single text, and its animation restarts with every new hit."));
                 table.pref(check(KEY_STATUS_FUSION, true,
                         "Status text fusion", "A status text (wet, freezing, tarred) plays its animation once per target and only appears again after the animation ends."));
+                table.pref(check(KEY_STATUS_FLOOD, true,
+                        "Status flood", "When a unit is hit by a status effect, its status text will not appear again until the status ends and is applied again."));
             });
         } catch (Exception ex) {
             Log.err("[Damage Numbers] No se pudo crear el menu de ajustes: " + ex.getMessage());
@@ -321,9 +348,9 @@ public class DamageNumbersMod extends Mod {
         return v / 10f; // 20 = tamano 2.0
     }
 
-    // "Text spacing" es la separacion TOTAL entre icono y texto; cada lado recibe la mitad.
+    // "Icon spacing" es la separacion TOTAL entre icono y texto; cada lado recibe la mitad.
     private float halfSpacing() {
-        int v = Mathf.clamp(Core.settings.getInt(KEY_TEXT_SPACING, TEXT_SPACING_DEFAULT), TEXT_SPACING_MIN, TEXT_SPACING_MAX);
+        int v = Mathf.clamp(Core.settings.getInt(KEY_ICON_SPACING, ICON_SPACING_DEFAULT), ICON_SPACING_MIN, ICON_SPACING_MAX);
         return v / 2f;
     }
 
@@ -337,6 +364,10 @@ public class DamageNumbersMod extends Mod {
 
     private boolean statusFusion() {
         return Core.settings.getBool(KEY_STATUS_FUSION, true);
+    }
+
+    private boolean statusFlood() {
+        return Core.settings.getBool(KEY_STATUS_FLOOD, true);
     }
 
     // =====================================================================
@@ -379,13 +410,22 @@ public class DamageNumbersMod extends Mod {
         spawnPair(teamTag(isAlly) + formatDamageText(raw, trueDamage) + "[]", pickIcon(type, trueDamage), x, y);
     }
 
-    // Texto de estado (mojado/alquitranado/congelante). Con "Status text fusion" un
-    // texto activo del mismo estado sobre el mismo objetivo sigue su unica animacion
-    // y los golpes nuevos no crean otro; vuelve a aparecer cuando termina.
-    private void showStatus(int targetId, StatusEffect status, float x, float y) {
-        boolean fuse = statusFusion();
-        long key = fusionKey(targetId, KIND_STATUS, status.id);
+    // Texto de estado (mojado/alquitranado/congelante).
+    //  - "Status flood": si ya anunciamos este estado a esta unidad y todavia lo tiene,
+    //    no se vuelve a mostrar hasta que se le quite y se le aplique de nuevo.
+    //  - "Status text fusion": mientras el texto del mismo estado siga animandose sobre la
+    //    unidad, los golpes nuevos no crean otro; vuelve a aparecer cuando termina.
+    private void showStatus(Unit unit, StatusEffect status, float x, float y) {
+        boolean flood = statusFlood();
+        long key = fusionKey(unit.id, KIND_STATUS, status.id);
 
+        if (flood) {
+            // Si es inmune, el estado nunca se aplica: no hay nada que anunciar.
+            if (unit.isImmune(status)) return;
+            if (statusMarkIndex.containsKey(key)) return;
+        }
+
+        boolean fuse = statusFusion();
         if (fuse && fusionIndex.containsKey(key)) return;
 
         Popup created = spawnPair(statusText(status), status.uiIcon, x, y);
@@ -393,6 +433,30 @@ public class DamageNumbersMod extends Mod {
             created.hasKey = true;
             created.fusionKey = key;
             fusionIndex.put(key, created);
+        }
+
+        if (flood) {
+            StatusMark mark = new StatusMark();
+            mark.unit = unit;
+            mark.unitId = unit.id;
+            mark.status = status;
+            mark.key = key;
+            statusMarks.add(mark);
+            statusMarkIndex.put(key, mark);
+        }
+    }
+
+    // Olvida los estados que la unidad ya perdio (o la unidad que ya no existe),
+    // para poder anunciarlos de nuevo si se vuelven a aplicar.
+    private void cleanStatusMarks() {
+        for (int i = statusMarks.size - 1; i >= 0; i--) {
+            StatusMark m = statusMarks.get(i);
+            boolean stale = m.unit.id != m.unitId || m.unit.dead || !m.unit.isAdded()
+                    || !m.unit.hasEffect(m.status);
+            if (stale) {
+                statusMarkIndex.remove(m.key);
+                statusMarks.remove(i);
+            }
         }
     }
 
