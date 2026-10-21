@@ -364,11 +364,13 @@ public class DamageNumbersMod extends Mod {
 
     // Un "ajuste" que solo dibuja el encabezado de un widget; los ajustes que se
     // agregan justo despues quedan agrupados debajo de el.
-    private Setting headerSetting(String title, String iconSprite) {
-        return new Setting("damage-numbers-header-" + title.toLowerCase().replace(' ', '-')) {
+    // OJO: los parametros NO se llaman "title": dentro de la clase anonima esa palabra
+    // apuntaria al campo "title" que hereda Setting (su nombre interno), no al parametro.
+    private Setting headerSetting(String headerText, String headerIconSprite) {
+        return new Setting("damage-numbers-header-" + headerText.toLowerCase().replace(' ', '-')) {
             @Override
             public void add(SettingsTable table) {
-                addHeader(table, title, iconSprite);
+                addHeader(table, headerText, headerIconSprite);
             }
         };
     }
