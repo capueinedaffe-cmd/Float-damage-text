@@ -82,6 +82,11 @@ public class DamageNumbersMod extends Mod {
     // (el juego le antepone el nombre del mod, por eso el nombre final repite "damage-numbers")
     private static final String CATEGORY_ICON_SPRITE = "damage-numbers-icon";
 
+    // Iconos de los encabezados de widget (assets/sprites/<nombre>.png). Si falta uno,
+    // el encabezado sale sin icono y el resto funciona igual.
+    private static final String CONFIG_ICON_SPRITE = "configuration-icon";
+    private static final String DAMAGE_TYPE_ICON_SPRITE = "icon-kinetic";
+
     // Tipos de objetivo/estado para las claves de fusion
     private static final int KIND_UNIT_DAMAGE = 1, KIND_BUILD_DAMAGE = 2, KIND_STATUS = 3;
 
@@ -315,7 +320,11 @@ public class DamageNumbersMod extends Mod {
             Drawable categoryIcon = iconRegion == null ? null : new TextureRegionDrawable(iconRegion);
 
             Vars.ui.settings.addCategory("Damage Numbers", categoryIcon, table -> {
+                // Widget "Damage type" (lleva su propio encabezado)
                 table.pref(damageTypeSetting());
+
+                // Widget "Configuration": los ajustes generales
+                table.pref(headerSetting("Configuration", CONFIG_ICON_SPRITE));
                 table.pref(slider(KEY_TEXT_SIZE, TEXT_SIZE_DEFAULT, TEXT_SIZE_MIN, TEXT_SIZE_MAX,
                         "Text size", "Size of the floating damage text."));
                 table.pref(slider(KEY_ICON_SPACING, ICON_SPACING_DEFAULT, ICON_SPACING_MIN, ICON_SPACING_MAX,
@@ -341,6 +350,29 @@ public class DamageNumbersMod extends Mod {
         return (v.equals("raw") || v.equals("true") || v.equals("both")) ? v : DAMAGE_TYPE_DEFAULT;
     }
 
+    // Encabezado de un widget: icono a la izquierda y titulo en color de acento.
+    private void addHeader(SettingsTable table, String title, String iconSprite) {
+        float width = Math.min(500f, Core.graphics.getWidth() / 1.2f / Scl.scl(1f));
+
+        table.table(header -> {
+            header.left();
+            TextureRegion icon = getCustomSprite(iconSprite);
+            if (icon != null) header.image(icon).size(28f).padRight(8f);
+            header.add(title).color(Pal.accent);
+        }).width(width).left().padTop(10f).row();
+    }
+
+    // Un "ajuste" que solo dibuja el encabezado de un widget; los ajustes que se
+    // agregan justo despues quedan agrupados debajo de el.
+    private Setting headerSetting(String title, String iconSprite) {
+        return new Setting("damage-numbers-header-" + title.toLowerCase().replace(' ', '-')) {
+            @Override
+            public void add(SettingsTable table) {
+                addHeader(table, title, iconSprite);
+            }
+        };
+    }
+
     // Selector de tipo de dano: titulo con icono, fila con botones Raw / True / Both y descripcion.
     private Setting damageTypeSetting() {
         Core.settings.defaults(KEY_DAMAGE_TYPE, DAMAGE_TYPE_DEFAULT);
@@ -351,12 +383,7 @@ public class DamageNumbersMod extends Mod {
                 float width = Math.min(500f, Core.graphics.getWidth() / 1.2f / Scl.scl(1f));
 
                 // Titulo con el icono de dano cinetico (assets/sprites/icon-kinetic.png)
-                table.table(header -> {
-                    header.left();
-                    TextureRegion icon = getCustomSprite("icon-kinetic");
-                    if (icon != null) header.image(icon).size(28f).padRight(8f);
-                    header.add("Damage type").color(Pal.accent);
-                }).width(width).left().padTop(10f).row();
+                addHeader(table, "Damage type", DAMAGE_TYPE_ICON_SPRITE);
 
                 // Fila: nombre de la opcion + botones de seleccion
                 table.table(row -> {
@@ -710,7 +737,7 @@ public class DamageNumbersMod extends Mod {
     }
 
     private String teamTag(boolean isAlly) {
-        return isAlly ? "[#CE4343]" : "[white]";
+        return isAlly ? "[scarlet]" : "[white]";
     }
 
     private String formatDamageText(float raw, float trueDamage) {
