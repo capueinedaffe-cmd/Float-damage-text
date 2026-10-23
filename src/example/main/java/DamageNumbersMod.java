@@ -112,10 +112,10 @@ public class DamageNumbersMod extends Mod {
     private static final float EJECT_APEX_TIME = 0.35f;    // Ejected casing: el punto mas alto, como fraccion de la vida
     private static final float EJECT_APEX_HEIGHT = 14f;    // Ejected casing: altura maxima sobre el punto de origen
     private static final float EJECT_DISTANCE = 24f;       // Ejected casing: distancia total hacia la derecha
-    private static final float WAVE_AMPLITUDE = 6f;        // Continuous wave: cuanto se aleja del centro a cada lado
+    private static final float WAVE_AMPLITUDE = 6f;        // Continuous wave: cuanto se aleja del centro a cada lado (curva suave)
     private static final float WAVE_PERIOD = 0.8f;         // Continuous wave: duracion de un zigzag completo
-    private static final float SCATTER_DISTANCE = 12f;     // Random scatter: distancia a la que se queda
-    private static final float SCATTER_SECONDS = 0.25f;    // Random scatter: tiempo en llegar a ese punto
+    private static final float SCATTER_DISTANCE = 30f;     // Random scatter: distancia a la que se queda
+    private static final float SCATTER_SECONDS = 0.35f;    // Random scatter: tiempo en llegar a ese punto
 
     // Tipos de objetivo/estado para las claves de fusion
     private static final int KIND_UNIT_DAMAGE = 1, KIND_BUILD_DAMAGE = 2, KIND_STATUS = 3;
@@ -515,8 +515,8 @@ public class DamageNumbersMod extends Mod {
                 String[][] options = {
                         {"Standard", "standard", "The text stays still for a moment, then floats upward."},
                         {"Ejected casing", "ejection", "The text flies up and to the right in an arc, then falls, like an ejected shell casing."},
-                        {"Continuous wave", "wave", "The text rises while zigzagging, starting from right to left."},
-                        {"Random scatter", "scatter", "The text bursts out from the center in a random direction and stays still. Does not work with Damage text fusion."}
+                        {"Continuous wave", "wave", "The text rises along a smooth zigzag, starting from right to left. It slows down at every turn and speeds up again, like a vehicle taking curves."},
+                        {"Random scatter", "scatter", "The text bursts out from the center in a random direction and stays still. While active, Damage text fusion and Status text fusion are turned off."}
                 };
                 for (String[] option : options) {
                     String value = option[1];
@@ -562,12 +562,18 @@ public class DamageNumbersMod extends Mod {
         return Core.settings.getBool(KEY_ICON_DISPLAY, true);
     }
 
+    // Random scatter no es compatible con las fusiones de texto: mientras esta elegido,
+    // ambas fusiones quedan desactivadas (sin tocar lo que marcaste en el menu).
+    private boolean scatterActive() {
+        return displacementMode().equals("scatter");
+    }
+
     private boolean damageFusion() {
-        return Core.settings.getBool(KEY_DAMAGE_FUSION, false);
+        return !scatterActive() && Core.settings.getBool(KEY_DAMAGE_FUSION, false);
     }
 
     private boolean statusFusion() {
-        return Core.settings.getBool(KEY_STATUS_FUSION, true);
+        return !scatterActive() && Core.settings.getBool(KEY_STATUS_FUSION, true);
     }
 
     private boolean statusFlood() {
@@ -779,10 +785,10 @@ public class DamageNumbersMod extends Mod {
                 break;
             }
             case DISP_WAVE: {
-                // Zigzag horizontal (onda triangular que arranca a la derecha y va hacia la
-                // izquierda) mientras sube como el desplazamiento Standard.
-                float u = (p.age / WAVE_PERIOD) % 1f;
-                out.dx = WAVE_AMPLITUDE * (2f * Math.abs(2f * u - 1f) - 1f);
+                // Zigzag horizontal suave (coseno): arranca a la derecha y va hacia la izquierda,
+                // frena en cada extremo y recupera la velocidad al cruzar el centro, como un
+                // vehiculo tomando curvas. Mientras tanto sube como el desplazamiento Standard.
+                out.dx = WAVE_AMPLITUDE * Mathf.cos(p.age / WAVE_PERIOD * Mathf.PI2);
                 out.dy = Math.max(0f, p.age - holdSeconds) * riseSpeed;
                 break;
             }
