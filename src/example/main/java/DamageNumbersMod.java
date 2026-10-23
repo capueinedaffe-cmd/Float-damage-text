@@ -9,6 +9,7 @@ import arc.graphics.g2d.Font;
 import arc.graphics.g2d.GlyphLayout;
 import arc.graphics.g2d.TextureRegion;
 import arc.math.Mathf;
+import arc.math.geom.Rect;
 import arc.scene.style.Drawable;
 import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.ButtonGroup;
@@ -17,8 +18,10 @@ import arc.scene.ui.layout.Scl;
 import arc.struct.IntSet;
 import arc.struct.LongMap;
 import arc.struct.Seq;
+import arc.util.Align;
 import arc.util.Log;
 import arc.util.Time;
+import arc.util.Tmp;
 import arc.util.pooling.Pools;
 import arc.util.serialization.Jval;
 import mindustry.Vars;
@@ -31,7 +34,8 @@ import mindustry.gen.Building;
 import mindustry.gen.Bullet;
 import mindustry.gen.Groups;
 import mindustry.gen.Unit;
-import mindustry.gen.WorldLabel;
+import mindustry.graphics.Drawf;
+import mindustry.graphics.Layer;
 import mindustry.graphics.Pal;
 import mindustry.mod.Mod;
 import mindustry.type.StatusEffect;
@@ -52,10 +56,6 @@ public class DamageNumbersMod extends Mod {
 
     private static final String MOD_NAME = "damage-numbers";
 
-    // flagOutline = 1 << 1 = 2 (valor tomado del codigo fuente de WorldLabelComp,
-    // escrito como literal para no depender de esa clase en tiempo de ejecucion)
-    private static final byte FLAG_OUTLINE = 2;
-
     // --- Dano anulado: cuando el dano verdadero es 0 ---
     private static final String NULLED_TEXT = "nulled";
     private static final String NULLED_SPRITE = "nullDamage"; // assets/sprites/nullDamage.png
@@ -73,6 +73,11 @@ public class DamageNumbersMod extends Mod {
     private static final String KEY_STATUS_FUSION = "damage-numbers-status-fusion";
     private static final String KEY_STATUS_FLOOD = "damage-numbers-status-flood";
     private static final String KEY_DAMAGE_TYPE = "damage-numbers-damage-type"; // "raw" | "true" | "both"
+    private static final String KEY_ANIM_BOUNCE = "damage-numbers-anim-bounce";
+    private static final String KEY_ANIM_FADE_IN = "damage-numbers-anim-fade-in";
+    private static final String KEY_ANIM_FADE_OUT = "damage-numbers-anim-fade-out";
+    private static final String KEY_ANIM_GROW = "damage-numbers-anim-grow";
+    private static final String KEY_ANIM_SHRINK = "damage-numbers-anim-shrink";
     private static final String DAMAGE_TYPE_DEFAULT = "raw";
 
     private static final int TEXT_SIZE_DEFAULT = 20, TEXT_SIZE_MIN = 1, TEXT_SIZE_MAX = 50;
@@ -85,7 +90,19 @@ public class DamageNumbersMod extends Mod {
     // Iconos de los encabezados de widget (assets/sprites/<nombre>.png). Si falta uno,
     // el encabezado sale sin icono y el resto funciona igual.
     private static final String CONFIG_ICON_SPRITE = "configuration-icon";
+    private static final String ANIMATION_ICON_SPRITE = "animation-effect-icon";
     private static final String DAMAGE_TYPE_ICON_SPRITE = "icon-kinetic";
+
+    // --- Efectos de animacion (tiempos en segundos, escalas como multiplicador) ---
+    private static final float FADE_IN_SECONDS = 0.2f;     // Fade in: casi instantaneo (se suma a la vida del texto)
+    private static final float FADE_OUT_SECONDS = 1f;      // Fade out: se suma a la vida del texto
+    private static final float BOUNCE_PERIOD = 0.6f;       // Bounce: duracion de cada pulso
+    private static final float BOUNCE_MAX_SCALE = 1.4f;    // Bounce: 1.0 -> 1.4 -> 1.0
+    private static final float GROW_START_SCALE = 0.3f;    // Grow: tamano con el que nace
+    private static final float GROW_INTRO_SECONDS = 0.25f; // Grow: tiempo en llegar al tamano real
+    private static final float GROW_END_SCALE = 1.5f;      // Grow: tamano que alcanza justo al desaparecer
+    private static final float END_EFFECT_SECONDS = 0.5f;  // Grow/Shrink: ventana final de la vida del texto
+    private static final float MIN_VISIBLE_SCALE = 0.02f;  // por debajo de esto no se dibuja
 
     // Tipos de objetivo/estado para las claves de fusion
     private static final int KIND_UNIT_DAMAGE = 1, KIND_BUILD_DAMAGE = 2, KIND_STATUS = 3;
@@ -101,10 +118,10 @@ public class DamageNumbersMod extends Mod {
     private float holdSeconds = 0.15f;
     private float riseSpeed = 8f;
 
-    // Etiquetas de color (markup) para los estados de proyectiles de liquido
-    private String wetTag = "[#" + DEFAULT_WET_COLOR + "]";
-    private String tarredTag = "[#" + DEFAULT_TARRED_COLOR + "]";
-    private String freezingTag = "[#" + DEFAULT_FREEZING_COLOR + "]";
+    // Colores de los textos de estado de proyectiles de liquido
+    private Color wetColor = Color.valueOf(DEFAULT_WET_COLOR);
+    private Color tarredColor = Color.valueOf(DEFAULT_TARRED_COLOR);
+    private Color freezingColor = Color.valueOf(DEFAULT_FREEZING_COLOR);
 
     // --- Dano "true" (metodo hibrido) ---
     // Golpes directos -> formula real del juego.
@@ -116,11 +133,18 @@ public class DamageNumbersMod extends Mod {
 
     // --- Un texto flotante con su icono, que comparten un unico ciclo de animacion ---
     private static class Popup {
-        WorldLabel label;
+        String text;                 // texto a mostrar (sin etiquetas de color)
+        final Color color = new Color(1f, 1f, 1f, 1f); // color del texto
+        float fontSize;              // tamano base del texto (ajuste "Text size")
+        float textWidth, textHeight; // medidas del texto a escala 1, en unidades de mundo
         TextureRegion icon;          // null si no hay icono
         float anchorX, anchorY;      // punto central imaginario
         float textDx, iconDx;        // desplazamiento horizontal respecto al punto central
         float age;                   // segundos desde que (re)empezo la animacion
+        float lifetime;              // duracion total de la animacion, en segundos
+
+        // Efectos de animacion activos (se fijan cada vez que el popup se coloca/reinicia)
+        boolean bounce, fadeIn, fadeOut, grow, shrink;
 
         // Datos de fusion
         float sumRaw, sumTrue;       // dano acumulado (fusion de dano)
@@ -128,6 +152,15 @@ public class DamageNumbersMod extends Mod {
         long fusionKey;
     }
     private final Seq<Popup> popups = new Seq<>();
+
+    // Como se ve un popup en un instante dado (lo calcula computePose)
+    private static class Pose {
+        float dx, dy;                // desplazamiento respecto al punto central
+        float scale = 1f;            // multiplicador de tamano (texto, icono y separacion)
+        float alpha = 1f;            // opacidad, de 0 a 1
+    }
+    private final Pose pose = new Pose();
+    private final Color drawColor = new Color();
 
     // Textos fusionables activos: clave = (objetivo, tipo, estado)
     private final LongMap<Popup> fusionIndex = new LongMap<>();
@@ -184,37 +217,61 @@ public class DamageNumbersMod extends Mod {
             }
         });
 
-        // --- Anima los textos (y sus iconos) cada frame ---
+        // --- Anima y dibuja los textos (y sus iconos) cada frame ---
+        // Dibujamos nosotros el texto (ya no usamos WorldLabel) para controlar su
+        // posicion, tamano y opacidad en cada cuadro.
         Events.run(EventType.Trigger.drawOver, () -> {
-            // En pausa todo se queda quieto, sin flotar ni desaparecer.
-            if (Vars.state.isPaused()) return;
+            if (popups.isEmpty()) return;
 
-            float dt = Time.delta / 60f;
+            // En pausa el tiempo no avanza: todo se queda congelado (sin flotar ni
+            // desaparecer), pero se sigue dibujando para que no se esfume.
+            float dt = Vars.state.isPaused() ? 0f : Time.delta / 60f;
+
+            // Mismo estado de dibujo que usa el juego para sus textos de mundo: capa por
+            // encima de unidades y efectos, y fuera del pixelado si esta activo.
+            float oldZ = Draw.z();
+            Draw.z(Layer.playerName + 1f);
+            Drawf.text();
+
+            Rect view = Core.camera.bounds(Tmp.r1);
 
             for (int i = popups.size - 1; i >= 0; i--) {
                 Popup p = popups.get(i);
 
                 p.age += dt;
-                if (p.age >= labelLifetimeTicks) {
+                if (p.age >= p.lifetime) {
                     releasePopup(p);
                     popups.remove(i);
                     continue;
                 }
 
-                // Quieto durante holdSeconds, luego sube
-                float rise = Math.max(0f, p.age - holdSeconds) * riseSpeed;
-                p.label.x = p.anchorX + p.textDx;
-                p.label.y = p.anchorY + rise;
+                computePose(p, pose);
+
+                // Totalmente transparente o demasiado pequeno: no hay nada que dibujar
+                if (pose.alpha <= 0f || pose.scale < MIN_VISIBLE_SCALE) continue;
+
+                float x = p.anchorX + pose.dx;
+                float y = p.anchorY + pose.dy;
+
+                // Fuera de la camara no dibujamos nada
+                float reach = (Math.abs(p.iconDx) + p.textDx + p.textWidth) * pose.scale + iconSize;
+                if (!view.overlaps(x - reach, y - reach, reach * 2f, reach * 2f)) continue;
 
                 if (p.icon != null) {
                     // Reset ANTES de dibujar: limpia cualquier "mixcol" (tinte de
                     // destello) que haya dejado un efecto anterior en este frame.
                     Draw.reset();
-                    Draw.color(Color.white);
-                    Draw.rect(p.icon, p.anchorX + p.iconDx, p.anchorY + rise, iconSize, iconSize);
+                    Draw.color(Color.white, pose.alpha);
+                    float size = iconSize * pose.scale;
+                    Draw.rect(p.icon, p.anchorX + pose.dx + p.iconDx * pose.scale, y, size, size);
                     Draw.reset();
                 }
+
+                drawText(p, p.anchorX + pose.dx + p.textDx * pose.scale, y, pose.scale, pose.alpha);
             }
+
+            Draw.reset();
+            Draw.z(oldZ);
         });
 
         // --- Proyectiles absorbidos por escudos (ForceProjector, ForceFieldAbility, etc.) ---
@@ -337,6 +394,19 @@ public class DamageNumbersMod extends Mod {
                         "Status text fusion", "A status text (wet, freezing, tarred) plays its animation once per target and only appears again after the animation ends."));
                 table.pref(check(KEY_STATUS_FLOOD, true,
                         "Status flood", "When a unit is hit by a status effect, its status text will not appear again until the status ends and is applied again."));
+
+                // Widget "Animation effect": efectos acumulables
+                table.pref(headerSetting("Animation effect", ANIMATION_ICON_SPRITE));
+                table.pref(check(KEY_ANIM_BOUNCE, false,
+                        "Bounce", "The text pulses in size (1.0 > 1.4 > 1.0) in a loop until it disappears."));
+                table.pref(check(KEY_ANIM_FADE_IN, false,
+                        "Fade in", "The text appears almost instantly from transparent. Adds a short time to its lifetime."));
+                table.pref(check(KEY_ANIM_FADE_OUT, false,
+                        "Fade out", "The text fades out at the end of its life. Adds 1 second to its lifetime."));
+                table.pref(check(KEY_ANIM_GROW, false,
+                        "Grow", "The text starts small, grows to its real size, and keeps growing near the end until it disappears."));
+                table.pref(check(KEY_ANIM_SHRINK, false,
+                        "Shrink", "The text shrinks near the end until it disappears. Together with Grow, it starts small, reaches its real size and shrinks at the end."));
             });
         } catch (Exception ex) {
             Log.err("[Damage Numbers] No se pudo crear el menu de ajustes: " + ex.getMessage());
@@ -454,6 +524,26 @@ public class DamageNumbersMod extends Mod {
         return Core.settings.getBool(KEY_STATUS_FLOOD, true);
     }
 
+    private boolean animBounce() {
+        return Core.settings.getBool(KEY_ANIM_BOUNCE, false);
+    }
+
+    private boolean animFadeIn() {
+        return Core.settings.getBool(KEY_ANIM_FADE_IN, false);
+    }
+
+    private boolean animFadeOut() {
+        return Core.settings.getBool(KEY_ANIM_FADE_OUT, false);
+    }
+
+    private boolean animGrow() {
+        return Core.settings.getBool(KEY_ANIM_GROW, false);
+    }
+
+    private boolean animShrink() {
+        return Core.settings.getBool(KEY_ANIM_SHRINK, false);
+    }
+
     // =====================================================================
     //  Mostrar textos (con fusion opcional)
     // =====================================================================
@@ -477,11 +567,11 @@ public class DamageNumbersMod extends Mod {
                 existing.sumRaw += raw;
                 existing.sumTrue += trueDamage;
                 String text = formatDamageText(existing.sumRaw, existing.sumTrue);
-                layoutPopup(existing, teamTag(isAlly) + text + "[]", pickIcon(type, existing.sumTrue), x, y);
+                layoutPopup(existing, text, teamColor(isAlly), pickIcon(type, existing.sumTrue), x, y);
                 return;
             }
 
-            Popup created = spawnPair(teamTag(isAlly) + formatDamageText(raw, trueDamage) + "[]",
+            Popup created = spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly),
                     pickIcon(type, trueDamage), x, y);
             created.sumRaw = raw;
             created.sumTrue = trueDamage;
@@ -491,7 +581,7 @@ public class DamageNumbersMod extends Mod {
             return;
         }
 
-        spawnPair(teamTag(isAlly) + formatDamageText(raw, trueDamage) + "[]", pickIcon(type, trueDamage), x, y);
+        spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly), pickIcon(type, trueDamage), x, y);
     }
 
     // Texto de estado (mojado/alquitranado/congelante).
@@ -512,7 +602,7 @@ public class DamageNumbersMod extends Mod {
         boolean fuse = statusFusion();
         if (fuse && fusionIndex.containsKey(key)) return;
 
-        Popup created = spawnPair(statusText(status), status.uiIcon, x, y);
+        Popup created = spawnPair(status.localizedName, statusColor(status), status.uiIcon, x, y);
         if (fuse) {
             created.hasKey = true;
             created.fusionKey = key;
@@ -551,7 +641,7 @@ public class DamageNumbersMod extends Mod {
         // no es nuestro, el escudo que lo detuvo es nuestro (aliado).
         boolean isAlly = playerTeam != null && b.team != playerTeam;
 
-        spawnPair(teamTag(isAlly) + NULLED_TEXT + "[]", getCustomSprite(NULLED_SPRITE), b.x, b.y);
+        spawnPair(NULLED_TEXT, teamColor(isAlly), getCustomSprite(NULLED_SPRITE), b.x, b.y);
     }
 
     // =====================================================================
@@ -560,65 +650,130 @@ public class DamageNumbersMod extends Mod {
 
     // Crea un texto nuevo con su icono. Icono a la izquierda del punto central, texto
     // a la derecha, con la misma separacion sin importar cuantos caracteres tenga.
-    private Popup spawnPair(String markup, TextureRegion icon, float anchorX, float anchorY) {
+    private Popup spawnPair(String text, Color color, TextureRegion icon, float anchorX, float anchorY) {
         Popup p = new Popup();
-        p.label = WorldLabel.create();
-        p.label.flags = FLAG_OUTLINE;
-        layoutPopup(p, markup, icon, anchorX, anchorY);
-        p.label.add();
+        layoutPopup(p, text, color, icon, anchorX, anchorY);
         popups.add(p);
         return p;
     }
 
     // Coloca (o recoloca) un popup y reinicia su animacion.
-    private void layoutPopup(Popup p, String markup, TextureRegion icon, float anchorX, float anchorY) {
-        float size = fontSize();
-
+    private void layoutPopup(Popup p, String text, Color color, TextureRegion icon, float anchorX, float anchorY) {
+        p.text = text;
+        p.color.set(color);
+        p.fontSize = fontSize();
         p.icon = iconDisplay() ? icon : null;
         p.anchorX = anchorX;
         p.anchorY = anchorY;
         p.age = 0f;
 
+        p.bounce = animBounce();
+        p.fadeIn = animFadeIn();
+        p.fadeOut = animFadeOut();
+        p.grow = animGrow();
+        p.shrink = animShrink();
+
+        // Fade in y Fade out suman su propia duracion: el texto aparece y desaparece
+        // sin perder tiempo visible.
+        p.lifetime = labelLifetimeTicks
+                + (p.fadeIn ? FADE_IN_SECONDS : 0f)
+                + (p.fadeOut ? FADE_OUT_SECONDS : 0f);
+
+        measureText(p);
+
         if (p.icon != null) {
             float gap = halfSpacing();
-            p.textDx = gap + measureTextWidth(markup, size) / 2f;
+            p.textDx = gap + p.textWidth / 2f;
             p.iconDx = -gap - iconSize / 2f;
         } else {
             p.textDx = 0f;
             p.iconDx = 0f;
         }
-
-        p.label.text = markup;
-        p.label.fontSize = size;
-        p.label.x = anchorX + p.textDx;
-        p.label.y = anchorY;
-        // Red de seguridad: normalmente lo cerramos nosotros antes (ver releasePopup)
-        p.label.duration = labelLifetimeTicks + 2f;
     }
 
-    // Termina un popup: lo saca del indice de fusion y cierra su texto.
-    // WorldLabel debe cerrarse con hide(), no con remove().
+    // Termina un popup: lo saca del indice de fusion.
     private void releasePopup(Popup p) {
         if (p.hasKey && fusionIndex.get(p.fusionKey) == p) fusionIndex.remove(p.fusionKey);
-        p.label.hide();
     }
 
-    // Mide el ancho que tendra el texto en el mundo. Replica el calculo de
-    // WorldLabelComp.drawAt (misma fuente y misma escala).
-    private float measureTextWidth(String markupText, float size) {
+    // Calcula como se ve el popup segun su edad: desplazamiento, tamano y opacidad.
+    // Por ahora solo existe el desplazamiento "Standard" (quieto y luego sube); en las
+    // siguientes etapas aqui se componen los desplazamientos alternativos.
+    // Los efectos de animacion se pueden combinar entre si.
+    private void computePose(Popup p, Pose out) {
+        out.dx = 0f;
+        out.dy = Math.max(0f, p.age - holdSeconds) * riseSpeed;
+
+        float left = p.lifetime - p.age; // tiempo que le queda de vida
+
+        // --- Opacidad: Fade in (al inicio) y Fade out (al final) ---
+        float alpha = 1f;
+        if (p.fadeIn) alpha = Math.min(alpha, Mathf.clamp(p.age / FADE_IN_SECONDS, 0f, 1f));
+        if (p.fadeOut) alpha = Math.min(alpha, Mathf.clamp(left / FADE_OUT_SECONDS, 0f, 1f));
+        out.alpha = alpha;
+
+        // --- Tamano: Grow / Shrink (inicio y final de la vida) y Bounce (en bucle) ---
+        float scale = 1f;
+        float introWindow = Math.min(GROW_INTRO_SECONDS, p.lifetime / 2f);
+        float endWindow = Math.min(END_EFFECT_SECONDS, p.lifetime / 2f);
+
+        // Inicio: con Grow nace pequeno y llega al tamano real
+        if (p.grow && p.age < introWindow) {
+            scale = Mathf.lerp(GROW_START_SCALE, 1f, Mathf.clamp(p.age / introWindow, 0f, 1f));
+        }
+
+        // Final: Shrink se encoge hasta 0; Grow (sin Shrink) sigue agrandandose
+        if (left < endWindow) {
+            float t = Mathf.clamp(1f - left / endWindow, 0f, 1f);
+            if (p.shrink) scale *= Mathf.lerp(1f, 0f, t);
+            else if (p.grow) scale *= Mathf.lerp(1f, GROW_END_SCALE, t);
+        }
+
+        // Bounce: 1.0 -> 1.4 -> 1.0 en bucle, multiplica al resto
+        if (p.bounce) {
+            float pulse = 0.5f - 0.5f * Mathf.cos(p.age / BOUNCE_PERIOD * Mathf.PI2);
+            scale *= 1f + (BOUNCE_MAX_SCALE - 1f) * pulse;
+        }
+
+        out.scale = Math.max(scale, 0f);
+    }
+
+    // Dibuja el texto centrado en (cx, cy), igual que WorldLabelComp.drawAt: misma
+    // fuente con contorno, misma escala y misma alineacion; la opacidad va en el color.
+    private void drawText(Popup p, float cx, float cy, float scale, float alpha) {
+        Font font = Fonts.outline;
+
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * p.fontSize * scale / Scl.scl(1f));
+
+        drawColor.set(p.color);
+        drawColor.a *= alpha;
+        font.setColor(drawColor);
+
+        // En drawAt, "y" es la parte de arriba del texto: se sube la mitad de su alto
+        font.draw(p.text, cx, cy + p.textHeight * scale / 2f, 0f, Align.center, false);
+
+        font.getData().setScale(1f);
+        font.setColor(Color.white);
+        font.setUseIntegerPositions(ints);
+    }
+
+    // Mide el texto a escala 1 (misma fuente y misma escala que usa el juego).
+    private void measureText(Popup p) {
         Font font = Fonts.outline;
         GlyphLayout layout = Pools.obtain(GlyphLayout.class, GlyphLayout::new);
 
         boolean ints = font.usesIntegerPositions();
         font.setUseIntegerPositions(false);
-        font.getData().setScale(0.25f * size / Scl.scl(1f));
-        layout.setText(font, markupText);
-        float width = layout.width;
+        font.getData().setScale(0.25f * p.fontSize / Scl.scl(1f));
+        layout.setText(font, p.text);
+        p.textWidth = layout.width;
+        p.textHeight = layout.height;
 
         Pools.free(layout);
         font.getData().setScale(1f);
         font.setUseIntegerPositions(ints);
-        return width;
     }
 
     // =====================================================================
@@ -668,22 +823,20 @@ public class DamageNumbersMod extends Mod {
                 || type.status == StatusEffects.freezing);
     }
 
-    // Nombre del estado (traducido por el juego) con el color configurado
-    private String statusText(StatusEffect status) {
-        String tag = status == StatusEffects.wet ? wetTag
-                : status == StatusEffects.tarred ? tarredTag
-                : freezingTag;
-        return tag + status.localizedName + "[]";
+    // Color configurado para el texto de cada estado
+    private Color statusColor(StatusEffect status) {
+        return status == StatusEffects.wet ? wetColor
+                : status == StatusEffects.tarred ? tarredColor
+                : freezingColor;
     }
 
-    // Convierte un hex ("4169e1" o "#4169e1") en una etiqueta de color; si es invalido usa el de respaldo
-    private String colorTag(String hex, String fallbackHex) {
+    // Convierte un hex ("4169e1" o "#4169e1") en un color; si es invalido usa el de respaldo
+    private Color parseColor(String hex, String fallbackHex) {
         try {
-            Color c = Color.valueOf(hex);
-            return "[#" + c.toString().substring(0, 6) + "]";
+            return Color.valueOf(hex);
         } catch (Exception ex) {
             Log.warn("[Damage Numbers] Color invalido '" + hex + "', usando " + fallbackHex);
-            return "[#" + fallbackHex + "]";
+            return Color.valueOf(fallbackHex);
         }
     }
 
@@ -738,8 +891,8 @@ public class DamageNumbersMod extends Mod {
         });
     }
 
-    private String teamTag(boolean isAlly) {
-        return isAlly ? "[scarlet]" : "[white]";
+    private Color teamColor(boolean isAlly) {
+        return isAlly ? Color.scarlet : Color.white;
     }
 
     private String formatDamageText(float raw, float trueDamage) {
@@ -782,9 +935,9 @@ public class DamageNumbersMod extends Mod {
             holdSeconds = json.getFloat("holdSeconds", holdSeconds);
             riseSpeed = json.getFloat("riseSpeed", riseSpeed);
 
-            wetTag = colorTag(json.getString("wetColor", DEFAULT_WET_COLOR), DEFAULT_WET_COLOR);
-            tarredTag = colorTag(json.getString("tarredColor", DEFAULT_TARRED_COLOR), DEFAULT_TARRED_COLOR);
-            freezingTag = colorTag(json.getString("freezingColor", DEFAULT_FREEZING_COLOR), DEFAULT_FREEZING_COLOR);
+            wetColor = parseColor(json.getString("wetColor", DEFAULT_WET_COLOR), DEFAULT_WET_COLOR);
+            tarredColor = parseColor(json.getString("tarredColor", DEFAULT_TARRED_COLOR), DEFAULT_TARRED_COLOR);
+            freezingColor = parseColor(json.getString("freezingColor", DEFAULT_FREEZING_COLOR), DEFAULT_FREEZING_COLOR);
 
             Log.info("[Damage Numbers] Configuracion cargada correctamente");
         } catch (Exception e) {
