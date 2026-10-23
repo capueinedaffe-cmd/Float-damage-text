@@ -73,6 +73,8 @@ public class DamageNumbersMod extends Mod {
     private static final String KEY_STATUS_FUSION = "damage-numbers-status-fusion";
     private static final String KEY_STATUS_FLOOD = "damage-numbers-status-flood";
     private static final String KEY_DAMAGE_TYPE = "damage-numbers-damage-type"; // "raw" | "true" | "both"
+    private static final String KEY_DISPLACEMENT = "damage-numbers-displacement"; // "standard" | "ejection" | "wave" | "scatter"
+    private static final String DISPLACEMENT_DEFAULT = "standard";
     private static final String KEY_ANIM_BOUNCE = "damage-numbers-anim-bounce";
     private static final String KEY_ANIM_FADE_IN = "damage-numbers-anim-fade-in";
     private static final String KEY_ANIM_FADE_OUT = "damage-numbers-anim-fade-out";
@@ -91,6 +93,7 @@ public class DamageNumbersMod extends Mod {
     // el encabezado sale sin icono y el resto funciona igual.
     private static final String CONFIG_ICON_SPRITE = "configuration-icon";
     private static final String ANIMATION_ICON_SPRITE = "animation-effect-icon";
+    private static final String DISPLACEMENT_ICON_SPRITE = "displacement-effect-icon";
     private static final String DAMAGE_TYPE_ICON_SPRITE = "icon-kinetic";
 
     // --- Efectos de animacion (tiempos en segundos, escalas como multiplicador) ---
@@ -103,6 +106,16 @@ public class DamageNumbersMod extends Mod {
     private static final float GROW_END_SCALE = 1.5f;      // Grow: tamano que alcanza justo al desaparecer
     private static final float END_EFFECT_SECONDS = 0.5f;  // Grow/Shrink: ventana final de la vida del texto
     private static final float MIN_VISIBLE_SCALE = 0.02f;  // por debajo de esto no se dibuja
+
+    // --- Desplazamientos (distancias en unidades de mundo, tiempos en segundos) ---
+    private static final int DISP_STANDARD = 0, DISP_EJECTION = 1, DISP_WAVE = 2, DISP_SCATTER = 3;
+    private static final float EJECT_APEX_TIME = 0.35f;    // Ejected casing: el punto mas alto, como fraccion de la vida
+    private static final float EJECT_APEX_HEIGHT = 14f;    // Ejected casing: altura maxima sobre el punto de origen
+    private static final float EJECT_DISTANCE = 24f;       // Ejected casing: distancia total hacia la derecha
+    private static final float WAVE_AMPLITUDE = 6f;        // Continuous wave: cuanto se aleja del centro a cada lado
+    private static final float WAVE_PERIOD = 0.8f;         // Continuous wave: duracion de un zigzag completo
+    private static final float SCATTER_DISTANCE = 12f;     // Random scatter: distancia a la que se queda
+    private static final float SCATTER_SECONDS = 0.25f;    // Random scatter: tiempo en llegar a ese punto
 
     // Tipos de objetivo/estado para las claves de fusion
     private static final int KIND_UNIT_DAMAGE = 1, KIND_BUILD_DAMAGE = 2, KIND_STATUS = 3;
@@ -145,6 +158,10 @@ public class DamageNumbersMod extends Mod {
 
         // Efectos de animacion activos (se fijan cada vez que el popup se coloca/reinicia)
         boolean bounce, fadeIn, fadeOut, grow, shrink;
+
+        // Desplazamiento elegido (DISP_*) y direccion al azar de Random scatter, en radianes
+        int displacement;
+        float scatterAngle;
 
         // Datos de fusion
         float sumRaw, sumTrue;       // dano acumulado (fusion de dano)
@@ -395,6 +412,9 @@ public class DamageNumbersMod extends Mod {
                 table.pref(check(KEY_STATUS_FLOOD, true,
                         "Status flood", "When a unit is hit by a status effect, its status text will not appear again until the status ends and is applied again."));
 
+                // Widget "Displacement effect": solo uno activo a la vez
+                table.pref(displacementSetting());
+
                 // Widget "Animation effect": efectos acumulables
                 table.pref(headerSetting("Animation effect", ANIMATION_ICON_SPRITE));
                 table.pref(check(KEY_ANIM_BOUNCE, false,
@@ -480,6 +500,36 @@ public class DamageNumbersMod extends Mod {
         };
     }
 
+    // Selector de desplazamiento: encabezado con icono y, por cada opcion, un boton y su descripcion.
+    private Setting displacementSetting() {
+        Core.settings.defaults(KEY_DISPLACEMENT, DISPLACEMENT_DEFAULT);
+
+        return new Setting(KEY_DISPLACEMENT) {
+            @Override
+            public void add(SettingsTable table) {
+                float width = Math.min(500f, Core.graphics.getWidth() / 1.2f / Scl.scl(1f));
+
+                addHeader(table, "Displacement effect", DISPLACEMENT_ICON_SPRITE);
+
+                ButtonGroup<TextButton> group = new ButtonGroup<>();
+                String[][] options = {
+                        {"Standard", "standard", "The text stays still for a moment, then floats upward."},
+                        {"Ejected casing", "ejection", "The text flies up and to the right in an arc, then falls, like an ejected shell casing."},
+                        {"Continuous wave", "wave", "The text rises while zigzagging, starting from right to left."},
+                        {"Random scatter", "scatter", "The text bursts out from the center in a random direction and stays still. Does not work with Damage text fusion."}
+                };
+                for (String[] option : options) {
+                    String value = option[1];
+                    table.button(option[0], Styles.flatTogglet, () -> Core.settings.put(KEY_DISPLACEMENT, value))
+                            .group(group)
+                            .checked(b -> displacementMode().equals(value))
+                            .size(width, 40f).left().padTop(4f).row();
+                    table.add(option[2]).wrap().width(width).left().color(Color.lightGray).padTop(2f).padBottom(4f).row();
+                }
+            }
+        };
+    }
+
     private SliderSetting slider(String key, int def, int min, int max, String title, String description) {
         Core.settings.defaults(key, def);
         SliderSetting s = new SliderSetting(key, def, min, max, 1, i -> String.valueOf(i), null);
@@ -522,6 +572,22 @@ public class DamageNumbersMod extends Mod {
 
     private boolean statusFlood() {
         return Core.settings.getBool(KEY_STATUS_FLOOD, true);
+    }
+
+    // Desplazamiento elegido en el menu: "standard", "ejection", "wave" o "scatter".
+    private String displacementMode() {
+        String v = Core.settings.getString(KEY_DISPLACEMENT, DISPLACEMENT_DEFAULT);
+        return (v.equals("standard") || v.equals("ejection") || v.equals("wave") || v.equals("scatter"))
+                ? v : DISPLACEMENT_DEFAULT;
+    }
+
+    private int displacementId() {
+        switch (displacementMode()) {
+            case "ejection": return DISP_EJECTION;
+            case "wave": return DISP_WAVE;
+            case "scatter": return DISP_SCATTER;
+            default: return DISP_STANDARD;
+        }
     }
 
     private boolean animBounce() {
@@ -672,6 +738,8 @@ public class DamageNumbersMod extends Mod {
         p.fadeOut = animFadeOut();
         p.grow = animGrow();
         p.shrink = animShrink();
+        p.displacement = displacementId();
+        p.scatterAngle = Mathf.random(Mathf.PI2);
 
         // Fade in y Fade out suman su propia duracion: el texto aparece y desaparece
         // sin perder tiempo visible.
@@ -697,12 +765,40 @@ public class DamageNumbersMod extends Mod {
     }
 
     // Calcula como se ve el popup segun su edad: desplazamiento, tamano y opacidad.
-    // Por ahora solo existe el desplazamiento "Standard" (quieto y luego sube); en las
-    // siguientes etapas aqui se componen los desplazamientos alternativos.
-    // Los efectos de animacion se pueden combinar entre si.
+    // El desplazamiento es uno solo (el elegido en el menu); los efectos de animacion
+    // se pueden combinar entre si y con cualquier desplazamiento.
     private void computePose(Popup p, Pose out) {
-        out.dx = 0f;
-        out.dy = Math.max(0f, p.age - holdSeconds) * riseSpeed;
+        switch (p.displacement) {
+            case DISP_EJECTION: {
+                // Parabola hacia arriba y a la derecha que termina cayendo por debajo del origen.
+                float apexTime = Math.max(EJECT_APEX_TIME * p.lifetime, 0.01f);
+                float vy = 2f * EJECT_APEX_HEIGHT / apexTime;
+                float gravity = vy / apexTime;
+                out.dx = EJECT_DISTANCE * (p.age / p.lifetime);
+                out.dy = vy * p.age - 0.5f * gravity * p.age * p.age;
+                break;
+            }
+            case DISP_WAVE: {
+                // Zigzag horizontal (onda triangular que arranca a la derecha y va hacia la
+                // izquierda) mientras sube como el desplazamiento Standard.
+                float u = (p.age / WAVE_PERIOD) % 1f;
+                out.dx = WAVE_AMPLITUDE * (2f * Math.abs(2f * u - 1f) - 1f);
+                out.dy = Math.max(0f, p.age - holdSeconds) * riseSpeed;
+                break;
+            }
+            case DISP_SCATTER: {
+                // Sale del centro en una direccion al azar, frena al llegar y se queda quieto.
+                float t = Mathf.clamp(p.age / SCATTER_SECONDS, 0f, 1f);
+                float eased = 1f - (1f - t) * (1f - t);
+                out.dx = Mathf.cos(p.scatterAngle) * SCATTER_DISTANCE * eased;
+                out.dy = Mathf.sin(p.scatterAngle) * SCATTER_DISTANCE * eased;
+                break;
+            }
+            default: {
+                out.dx = 0f;
+                out.dy = Math.max(0f, p.age - holdSeconds) * riseSpeed;
+            }
+        }
 
         float left = p.lifetime - p.age; // tiempo que le queda de vida
 
