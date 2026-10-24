@@ -180,8 +180,8 @@ public class DamageNumbersMod extends Mod {
     private boolean showAllyBuildingDamage = true;
     private boolean showEnemyBuildingDamage = true;
     private boolean showShieldNulled = true;
-    private float labelLifetimeTicks = 40f;
-    private float iconSize = 6f;
+    private float labelLifetimeTicks = 1f;
+    private float iconSize = 8f;
     private float holdSeconds = 0.15f;
     private float riseSpeed = 8f;
 
