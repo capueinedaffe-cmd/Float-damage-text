@@ -2,12 +2,9 @@ package damage_numbers;
 
 import arc.Core;
 import arc.Events;
-import arc.files.Fi;
 import arc.func.Cons;
 import arc.graphics.Blending;
 import arc.graphics.Color;
-import arc.graphics.Pixmap;
-import arc.graphics.Texture;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Font;
@@ -137,19 +134,43 @@ public class DamageNumbersMod extends Mod {
     private static final int CRIT_FUSED_DEFAULT = 5000, CRIT_SINGLE_DEFAULT = 500, CRIT_MAX = 999999;
     private static final int PARTICLE_SCALE_DEFAULT = 100, PARTICLE_SCALE_MIN = 25, PARTICLE_SCALE_MAX = 300;
 
-    // --- Particulas: spritesheets en assets/particle-effects/ ---
-    // Cada efecto usa hasta 3 hojas: <efecto>-particles.png, <efecto>-particles-2.png y
-    // <efecto>-particles-3.png. Cada cuadro mide 120x120; 3 columnas de 10 cuadros que se
-    // leen de arriba a abajo y de izquierda a derecha (30 cuadros por hoja).
-    private static final String PARTICLE_DIR = "particle-effects";
-    private static final int PARTICLE_FRAME = 120;
-    private static final int PARTICLE_COLUMNS = 3, PARTICLE_ROWS = 10;
-    private static final float PARTICLE_BASE_SIZE = 10f;   // lado de un cuadro en unidades de mundo (texto tamano 2.0, escala 1, "Particle size" 100%)
+    // --- Particulas y efectos criticos: todo se dibuja por codigo (sin imagenes) ---
+    private static final float PARTICLE_BASE_SIZE = 10f;   // tamano de referencia de las particulas y cristales (unidades de mundo, texto tamano 2.0, "Particle size" 100%)
     private static final int PARTICLE_MAX_PER_TEXT = 24;   // tope de particulas simultaneas en un solo texto
 
     // Efectos criticos disponibles (uno por estado de la bala). Los demas llegan en proximas entregas.
-    private static final int FX_NONE = 0, FX_MELTING = 1;
-    private static final String FX_MELTING_NAME = "melting";
+    private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2;
+
+    // --- Freezing: cristales de hielo en tres fases pulsantes, texto celeste y nieve ---
+    // Fase 1: tres cristales pequenos. Fase 2: crecen y aparece otro pequeno. Fase 3: el central crece mas.
+    private static final float ICE_PHASE2_AT = 0.30f, ICE_PHASE3_AT = 0.60f; // inicio de cada fase (fraccion de la vida del texto)
+    private static final float ICE_PULSE_SECONDS = 0.22f;  // duracion del "pulso" de crecimiento al empezar cada fase
+    private static final float ICE_ALPHA = 0.5f;           // opacidad de los cristales
+    // Por cristal: x, y (fraccion del ancho/alto del texto), giro (grados) y tamano en fase 1, 2 y 3
+    // (multiplos del tamano de referencia).
+    private static final float[][] ICE_CRYSTALS = {
+            {-0.46f, 0.10f, 22f, 0.40f, 0.62f, 0.62f},     // izquierdo
+            {0.00f, 0.00f, -6f, 0.40f, 0.62f, 1.25f},      // central (el que mas crece)
+            {0.46f, -0.10f, -24f, 0.40f, 0.62f, 0.62f},    // derecho
+            {0.17f, 0.55f, 14f, 0.00f, 0.35f, 0.35f}       // pequeno que aparece en la fase 2
+    };
+    // Forma del cristal (hexagono alargado): vertices en orden punta, derecha arriba, derecha abajo,
+    // punta inferior, izquierda abajo, izquierda arriba. x se multiplica por el ancho y y por el alto.
+    private static final float[] ICE_LX = {0f, 1f, 0.85f, 0f, -0.85f, -1f};
+    private static final float[] ICE_LY = {0.5f, 0.22f, -0.30f, -0.5f, -0.30f, 0.22f};
+    private static final float[] ICE_TONE = {0f, 0.28f, 0.8f, 1f, 0.8f, 0.28f}; // 0 = celeste, 1 = azul
+    private static final Color ICE_LIGHT = Color.valueOf("b8ecff");
+    private static final Color ICE_DEEP = Color.valueOf("3f7dff");
+    private static final Color TEXT_ICE = Color.valueOf("aee9ff");
+    private static final Color GLOW_ICE_BLUE = new Color(0.25f, 0.55f, 1f, 0.14f);
+    private static final Color GLOW_ICE_CYAN = new Color(0.6f, 0.92f, 1f, 0.12f);
+    private static final float FREEZE_GLOW_OFFSET = 0.4f;  // separacion del glow (unidades, texto tamano 2.0)
+    // Nieve: particulas blancas de baja opacidad que caen sin parar
+    private static final float SNOW_LIFE_MIN = 0.8f, SNOW_LIFE_MAX = 1.6f;
+    private static final float SNOW_FALL = 5f;             // unidades por segundo (texto tamano 2.0)
+    private static final float SNOW_SWAY = 0.9f;           // vaiven lateral
+    private static final float SNOW_ALPHA = 0.35f;
+    private static final float SNOW_SIZE = 0.38f;          // radio base
 
     // --- Melting: burbujas de lava en bucle, glow movil y texto "derretido" ---
     private static final float MELT_LIFE_MIN = 0.5f, MELT_LIFE_MAX = 1f; // duracion de cada burbuja (segundos)
@@ -180,8 +201,8 @@ public class DamageNumbersMod extends Mod {
     private boolean showAllyBuildingDamage = true;
     private boolean showEnemyBuildingDamage = true;
     private boolean showShieldNulled = true;
-    private float labelLifetimeTicks = 1f;
-    private float iconSize = 8f;
+    private float labelLifetimeTicks = 40f;
+    private float iconSize = 6f;
     private float holdSeconds = 0.15f;
     private float riseSpeed = 8f;
 
@@ -236,7 +257,6 @@ public class DamageNumbersMod extends Mod {
         float offX, offY;            // posicion respecto al centro del texto, a escala 1
         float age, life;             // edad negativa = aun no nace
         float sizeMul;               // variacion de tamano
-        int variant;                 // hoja elegida (-1 = burbuja de marcador)
         float phase;                 // desfase propio (color y parpadeo de los destellos)
     }
     private final Seq<Popup> popups = new Seq<>();
@@ -246,7 +266,7 @@ public class DamageNumbersMod extends Mod {
     private float particleSizeMul = 1f;
     private int particleCap = Integer.MAX_VALUE;
     private int liveParticles;
-    private final ConcurrentHashMap<String, TextureRegion[][]> sheetCache = new ConcurrentHashMap<>();
+    private final float[] iceX = new float[6], iceY = new float[6], iceCl = new float[6], iceCr = new float[6];
 
     // Como se ve un popup en un instante dado (lo calcula computePose)
     private static class Pose {
@@ -364,6 +384,9 @@ public class DamageNumbersMod extends Mod {
                 float reach = (Math.abs(p.iconDx) + p.textDx + p.textWidth) * pose.scale + iconSize;
                 if (!view.overlaps(x - reach, y - reach, reach * 2f, reach * 2f)) continue;
 
+                float textCx = p.anchorX + pose.dx + p.textDx * pose.scale;
+                if (p.critEffect == FX_FREEZING) drawIceCrystals(p, textCx, y, pose); // detras del icono y del texto
+
                 if (p.icon != null) {
                     // Reset ANTES de dibujar: limpia cualquier "mixcol" (tinte de
                     // destello) que haya dejado un efecto anterior en este frame.
@@ -374,8 +397,8 @@ public class DamageNumbersMod extends Mod {
                     Draw.reset();
                 }
 
-                float textCx = p.anchorX + pose.dx + p.textDx * pose.scale;
                 if (p.critEffect == FX_MELTING) drawMeltingText(p, textCx, y, pose.scale, pose.alpha);
+                else if (p.critEffect == FX_FREEZING) drawFrozenText(p, textCx, y, pose.scale, pose.alpha);
                 else drawText(p, textCx, y, pose.scale, pose.alpha);
 
                 if (p.critEffect != FX_NONE) updateParticles(p, dt, textCx, y, pose);
@@ -1060,13 +1083,17 @@ public class DamageNumbersMod extends Mod {
     // Dibuja el texto centrado en (cx, cy), igual que WorldLabelComp.drawAt: misma
     // fuente con contorno, misma escala y misma alineacion; la opacidad va en el color.
     private void drawText(Popup p, float cx, float cy, float scale, float alpha) {
+        drawText(p, cx, cy, scale, alpha, p.color);
+    }
+
+    private void drawText(Popup p, float cx, float cy, float scale, float alpha, Color color) {
         Font font = Fonts.outline;
 
         boolean ints = font.usesIntegerPositions();
         font.setUseIntegerPositions(false);
         font.getData().setScale(0.25f * p.fontSize * scale / Scl.scl(1f));
 
-        drawColor.set(p.color);
+        drawColor.set(color);
         drawColor.a *= alpha;
         font.setColor(drawColor);
 
@@ -1107,65 +1134,22 @@ public class DamageNumbersMod extends Mod {
 
     // Efecto critico segun el estado de la bala (los demas estados llegan mas adelante).
     private int critEffectFor(BulletType type) {
-        if (type != null && type.status == StatusEffects.melting) return FX_MELTING;
+        if (type == null) return FX_NONE;
+        if (type.status == StatusEffects.melting) return FX_MELTING;
+        if (type.status == StatusEffects.freezing) return FX_FREEZING;
         return FX_NONE;
     }
 
-    // Hojas de particulas de un efecto: [variante][cuadro]. Si no hay ninguna devuelve un
-    // arreglo vacio y se dibujan burbujas de marcador. Se carga una sola vez por efecto.
-    private TextureRegion[][] particleFrames(String effect) {
-        TextureRegion[][] cached = sheetCache.get(effect);
-        if (cached != null) return cached;
-
-        Seq<TextureRegion[]> variants = new Seq<>();
-        try {
-            var mod = Vars.mods.getMod(MOD_NAME);
-            if (mod != null) {
-                Fi dir = mod.root.child(PARTICLE_DIR);
-                if (!dir.exists()) dir = mod.root.child("assets").child(PARTICLE_DIR);
-
-                String[] names = {effect + "-particles.png", effect + "-particles-2.png", effect + "-particles-3.png"};
-                for (String name : names) {
-                    Fi file = dir.child(name);
-                    if (!file.exists()) continue;
-
-                    Pixmap pix = new Pixmap(file);
-                    int cols = Math.min(PARTICLE_COLUMNS, pix.width / PARTICLE_FRAME);
-                    int rows = Math.min(PARTICLE_ROWS, pix.height / PARTICLE_FRAME);
-                    Texture tex = new Texture(pix);
-                    pix.dispose();
-                    tex.setFilter(Texture.TextureFilter.linear);
-
-                    // Lectura: de arriba a abajo dentro de cada columna, y luego la columna siguiente
-                    TextureRegion[] frames = new TextureRegion[cols * rows];
-                    for (int i = 0; i < frames.length; i++) {
-                        int col = i / rows, row = i % rows;
-                        frames[i] = new TextureRegion(tex, col * PARTICLE_FRAME, row * PARTICLE_FRAME,
-                                PARTICLE_FRAME, PARTICLE_FRAME);
-                    }
-                    if (frames.length > 0) variants.add(frames);
-                }
-            }
-        } catch (Exception ex) {
-            Log.err("[Damage Numbers] No se pudieron cargar las particulas de '" + effect + "': " + ex.getMessage());
-        }
-
-        if (variants.isEmpty()) {
-            Log.warn("[Damage Numbers] No se encontraron hojas de particulas para '" + effect
-                    + "'. Coloca " + effect + "-particles.png en assets/" + PARTICLE_DIR
-                    + "/ (mientras tanto se dibujan burbujas de marcador).");
-        }
-
-        TextureRegion[][] result = variants.toArray(TextureRegion[].class);
-        sheetCache.put(effect, result);
-        return result;
+    // Particulas del efecto critico de un texto (cx, cy = centro del texto).
+    private void updateParticles(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.critEffect == FX_MELTING) updateMeltParticles(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_FREEZING) updateSnow(p, dt, cx, cy, pose);
     }
 
-    // Avanza, recicla y dibuja las particulas de un texto critico (cx, cy = centro del texto).
-    private void updateParticles(Popup p, float dt, float cx, float cy, Pose pose) {
+    // Melting: burbujas de lava en bucle y destellos de luz.
+    private void updateMeltParticles(Popup p, float dt, float cx, float cy, Pose pose) {
         if (p.particles == null) p.particles = new Seq<>();
 
-        TextureRegion[][] sheets = particleFrames(FX_MELTING_NAME);
         float size = PARTICLE_BASE_SIZE * (p.fontSize / 2f) * particleSizeMul;
         // Mas ancho el texto (de 3 a 6 digitos), mas burbujas, repartidas a lo ancho
         int target = Mathf.clamp(Math.round(p.textWidth / (size * 0.6f)), MELT_MIN_PARTICLES, PARTICLE_MAX_PER_TEXT);
@@ -1180,7 +1164,7 @@ public class DamageNumbersMod extends Mod {
             if (pt.age < pt.life) continue;
 
             if (canSpawn && i < target && liveParticles <= particleCap) {
-                spawnMeltParticle(p, pt, i, target, size, remaining, sheets.length);
+                spawnMeltParticle(p, pt, i, target, size, remaining);
             } else {
                 p.particles.remove(i);
                 liveParticles--;
@@ -1190,7 +1174,7 @@ public class DamageNumbersMod extends Mod {
         // Reponer hasta el objetivo, respetando el limite global de particulas
         while (canSpawn && p.particles.size < target && liveParticles < particleCap) {
             Particle pt = new Particle();
-            spawnMeltParticle(p, pt, p.particles.size, target, size, remaining, sheets.length);
+            spawnMeltParticle(p, pt, p.particles.size, target, size, remaining);
             pt.age = -Mathf.random(MELT_LIFE_MAX); // nacen desfasadas para que no revienten a la vez
             p.particles.add(pt);
             liveParticles++;
@@ -1206,15 +1190,7 @@ public class DamageNumbersMod extends Mod {
             float py = cy + pt.offY * pose.scale;
             float s = size * pt.sizeMul * pose.scale;
 
-            if (pt.variant >= 0 && pt.variant < sheets.length) {
-                TextureRegion[] frames = sheets[pt.variant];
-                int idx = Math.min((int) (t * frames.length), frames.length - 1);
-                Draw.reset();
-                Draw.color(1f, 1f, 1f, pose.alpha);
-                Draw.rect(frames[idx], px, py, s, s);
-            } else {
-                drawPlaceholderBubble(px, py, s, t, pose.alpha);
-            }
+            drawLavaBubble(px, py, s, t, pose.alpha);
         }
 
         updateSparks(p, dt, cx, cy, pose, size, remaining);
@@ -1292,11 +1268,10 @@ public class DamageNumbersMod extends Mod {
         sp.phase = Mathf.random(Mathf.PI2);
         sp.life = Math.max(Math.min(Mathf.random(SPARK_LIFE_MIN, SPARK_LIFE_MAX), remaining), 0.05f);
         sp.age = 0f;
-        sp.variant = -1;
     }
 
     // Coloca una burbuja de lava nueva: dentro de su "franja" a lo ancho del texto, a una altura al azar.
-    private void spawnMeltParticle(Popup p, Particle pt, int slot, int slots, float size, float remaining, int variants) {
+    private void spawnMeltParticle(Popup p, Particle pt, int slot, int slots, float size, float remaining) {
         int n = Math.max(slots, 1);
         float halfW = p.textWidth / 2f + size * 0.15f;
         float halfH = p.textHeight / 2f + size * 0.2f;
@@ -1307,11 +1282,10 @@ public class DamageNumbersMod extends Mod {
         pt.sizeMul = Mathf.random(0.7f, 1.2f);
         pt.life = Math.max(Math.min(Mathf.random(MELT_LIFE_MIN, MELT_LIFE_MAX), remaining), 0.05f);
         pt.age = 0f;
-        pt.variant = variants > 0 ? Mathf.random(variants - 1) : -1;
     }
 
-    // Burbuja de marcador (sin spritesheet): crece, y al final revienta en un aro que se desvanece.
-    private void drawPlaceholderBubble(float x, float y, float size, float t, float alpha) {
+    // Burbuja de lava: crece, y al final revienta en un aro que se desvanece.
+    private void drawLavaBubble(float x, float y, float size, float t, float alpha) {
         Draw.reset();
         if (t < 0.65f) {
             float k = t / 0.65f;
@@ -1326,6 +1300,162 @@ public class DamageNumbersMod extends Mod {
             Lines.circle(x, y, size * (0.3f + 0.25f * k));
         }
         Draw.reset();
+    }
+
+    // Pulso de crecimiento: sube pasandose un poco del tamano final y se asienta (x de 0 a 1).
+    private static float backOut(float x) {
+        float k = x - 1f;
+        return 1f + 2.70158f * k * k * k + 1.70158f * k * k;
+    }
+
+    // Cristales de Freezing, detras del texto. Cada fase empieza con un pulso de crecimiento.
+    private void drawIceCrystals(Popup p, float cx, float cy, Pose pose) {
+        float ref = PARTICLE_BASE_SIZE * (p.fontSize / 2f) * particleSizeMul;
+        float t2 = ICE_PHASE2_AT * p.lifetime;
+        float t3 = ICE_PHASE3_AT * p.lifetime;
+
+        float k1 = backOut(Mathf.clamp(p.age / ICE_PULSE_SECONDS, 0f, 1f));
+        float k2 = backOut(Mathf.clamp((p.age - t2) / ICE_PULSE_SECONDS, 0f, 1f));
+        float k3 = backOut(Mathf.clamp((p.age - t3) / ICE_PULSE_SECONDS, 0f, 1f));
+
+        for (float[] c : ICE_CRYSTALS) {
+            float size = c[3] * k1 + (c[4] - c[3]) * k2 + (c[5] - c[4]) * k3;
+            if (size <= 0.01f) continue;
+            drawIceCrystal(cx + c[0] * p.textWidth * pose.scale, cy + c[1] * p.textHeight * pose.scale,
+                    ref * size * pose.scale, c[2], pose.alpha);
+        }
+        Draw.reset();
+    }
+
+    // Un cristal: hexagono alargado en dos facetas con degradado de celeste (arriba) a azul (abajo),
+    // al 50 % de opacidad, con lineas blancas en el borde y en sus aristas.
+    private void drawIceCrystal(float x, float y, float h, float rotDeg, float alpha) {
+        float w = h * 0.28f;
+        float rad = rotDeg * Mathf.PI / 180f;
+        float cs = Mathf.cos(rad), sn = Mathf.sin(rad);
+        float fill = ICE_ALPHA * alpha;
+
+        for (int i = 0; i < 6; i++) {
+            float lx = ICE_LX[i] * w, ly = ICE_LY[i] * h;
+            iceX[i] = x + lx * cs - ly * sn;
+            iceY[i] = y + lx * sn + ly * cs;
+
+            Tmp.c1.set(ICE_LIGHT).lerp(ICE_DEEP, ICE_TONE[i]);
+            iceCl[i] = Color.toFloatBits(Tmp.c1.r, Tmp.c1.g, Tmp.c1.b, fill);
+            // La faceta derecha es un poco mas oscura para dar volumen
+            Tmp.c1.set(ICE_LIGHT).lerp(ICE_DEEP, Math.min(ICE_TONE[i] + 0.2f, 1f));
+            iceCr[i] = Color.toFloatBits(Tmp.c1.r, Tmp.c1.g, Tmp.c1.b, fill);
+        }
+
+        // Faceta izquierda (punta, izq. arriba, izq. abajo, punta inferior) y derecha
+        Fill.quad(iceX[0], iceY[0], iceCl[0], iceX[5], iceY[5], iceCl[5],
+                iceX[4], iceY[4], iceCl[4], iceX[3], iceY[3], iceCl[3]);
+        Fill.quad(iceX[0], iceY[0], iceCr[0], iceX[1], iceY[1], iceCr[1],
+                iceX[2], iceY[2], iceCr[2], iceX[3], iceY[3], iceCr[3]);
+
+        // Lineas blancas: contorno, arista central y los cortes de las facetas
+        Draw.color(Color.white, alpha * 0.85f);
+        Lines.stroke(Math.max(0.25f, h * 0.035f));
+        for (int i = 0; i < 6; i++) {
+            int j = (i + 1) % 6;
+            Lines.line(iceX[i], iceY[i], iceX[j], iceY[j]);
+        }
+        Lines.line(iceX[0], iceY[0], iceX[3], iceY[3]);
+        float mx = x + (0f * cs - (-0.16f * h) * sn);
+        float my = y + (0f * sn + (-0.16f * h) * cs);
+        Lines.line(iceX[5], iceY[5], mx, my);
+        Lines.line(iceX[1], iceY[1], mx, my);
+    }
+
+    // Texto de Freezing: celeste, con un glow muy ligero azul y celeste.
+    private void drawFrozenText(Popup p, float cx, float cy, float scale, float alpha) {
+        Font font = Fonts.outline;
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * p.fontSize * scale / Scl.scl(1f));
+
+        float g = FREEZE_GLOW_OFFSET * (p.fontSize / 2f) * scale;
+        float top = cy + p.textHeight * scale / 2f;
+
+        Draw.blend(Blending.additive);
+        drawColor.set(GLOW_ICE_BLUE);
+        drawColor.a *= alpha;
+        font.setColor(drawColor);
+        font.draw(p.text, cx - g, top, 0f, Align.center, false);
+        drawColor.set(GLOW_ICE_CYAN);
+        drawColor.a *= alpha;
+        font.setColor(drawColor);
+        font.draw(p.text, cx + g, top, 0f, Align.center, false);
+        Draw.blend();
+
+        font.getData().setScale(1f);
+        font.setColor(Color.white);
+        font.setUseIntegerPositions(ints);
+
+        drawText(p, cx, cy, scale, alpha, TEXT_ICE);
+    }
+
+    // Nieve de Freezing: puntos blancos de baja opacidad que nacen sobre el texto y caen
+    // sin parar, meciendose un poco. Cuentan para el limite de particulas.
+    private void updateSnow(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.particles == null) p.particles = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        int target = Mathf.clamp(Math.round(p.textWidth / (size * 0.5f)), 5, 18);
+        float remaining = p.lifetime - p.age;
+        boolean canSpawn = remaining >= SNOW_LIFE_MIN * 0.5f;
+
+        for (int i = p.particles.size - 1; i >= 0; i--) {
+            Particle pt = p.particles.get(i);
+            pt.age += dt;
+            if (pt.age < pt.life) continue;
+
+            if (canSpawn && i < target && liveParticles <= particleCap) {
+                spawnSnow(p, pt, i, target, size, remaining);
+            } else {
+                p.particles.remove(i);
+                liveParticles--;
+            }
+        }
+
+        while (canSpawn && p.particles.size < target && liveParticles < particleCap) {
+            Particle pt = new Particle();
+            spawnSnow(p, pt, p.particles.size, target, size, remaining);
+            pt.age = -Mathf.random(SNOW_LIFE_MAX); // nacen desfasados
+            p.particles.add(pt);
+            liveParticles++;
+        }
+
+        for (int i = 0; i < p.particles.size; i++) {
+            Particle pt = p.particles.get(i);
+            if (pt.age < 0f) continue;
+
+            float t = Mathf.clamp(pt.age / pt.life, 0f, 1f);
+            float a = SNOW_ALPHA * Mathf.sin(t * Mathf.PI) * pose.alpha; // aparece y se apaga
+            if (a <= 0.01f) continue;
+
+            float px = cx + (pt.offX + Mathf.sin(pt.age * 2f + pt.phase) * SNOW_SWAY * sizeFactor) * pose.scale;
+            float py = cy + (pt.offY - pt.age * SNOW_FALL * sizeFactor) * pose.scale;
+            Draw.color(Color.white, a);
+            Fill.circle(px, py, SNOW_SIZE * sizeFactor * pt.sizeMul * pose.scale);
+        }
+        Draw.reset();
+    }
+
+    // Coloca un copo nuevo en su franja a lo ancho del texto, desde la mitad de arriba hacia afuera.
+    private void spawnSnow(Popup p, Particle pt, int slot, int slots, float size, float remaining) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f + size * 0.2f;
+        float halfH = p.textHeight / 2f;
+        float slotW = halfW * 2f / n;
+
+        pt.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        pt.offY = Mathf.random(-halfH * 0.3f, halfH + size * 0.4f);
+        pt.sizeMul = Mathf.random(0.6f, 1.3f);
+        pt.phase = Mathf.random(Mathf.PI2);
+        pt.life = Math.max(Math.min(Mathf.random(SNOW_LIFE_MIN, SNOW_LIFE_MAX), remaining), 0.05f);
+        pt.age = 0f;
     }
 
     // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
