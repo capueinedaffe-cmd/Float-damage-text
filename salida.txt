@@ -1,0 +1,360 @@
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::load has been called by net.rubygrapefruit.platform.internal.NativeLibraryLoader in an unnamed module (file:/home/codespace/.gradle/wrapper/dists/gradle-9.8.0-bin/3m7h6ceboy5k31n8kzwzuxssm/gradle-9.8.0/lib/native-platform-0.22-milestone-29.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+
+> Task :compileJava FAILED
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:1: error: class, interface, enum, or record expected
+.package damage_numbers;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:3: error: class, interface, enum, or record expected
+import arc.Core;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:4: error: class, interface, enum, or record expected
+import arc.Events;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:5: error: class, interface, enum, or record expected
+import arc.files.Fi;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:6: error: class, interface, enum, or record expected
+import arc.func.Cons;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:7: error: class, interface, enum, or record expected
+import arc.graphics.Blending;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:8: error: class, interface, enum, or record expected
+import arc.graphics.Color;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:9: error: class, interface, enum, or record expected
+import arc.graphics.Pixmap;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:10: error: class, interface, enum, or record expected
+import arc.graphics.Texture;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:11: error: class, interface, enum, or record expected
+import arc.graphics.g2d.Draw;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:12: error: class, interface, enum, or record expected
+import arc.graphics.g2d.Fill;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:13: error: class, interface, enum, or record expected
+import arc.graphics.g2d.Font;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:14: error: class, interface, enum, or record expected
+import arc.graphics.g2d.GlyphLayout;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:15: error: class, interface, enum, or record expected
+import arc.graphics.g2d.Lines;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:16: error: class, interface, enum, or record expected
+import arc.graphics.g2d.TextureRegion;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:17: error: class, interface, enum, or record expected
+import arc.math.Mathf;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:18: error: class, interface, enum, or record expected
+import arc.math.geom.Rect;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:19: error: class, interface, enum, or record expected
+import arc.scene.style.Drawable;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:20: error: class, interface, enum, or record expected
+import arc.scene.style.TextureRegionDrawable;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:21: error: class, interface, enum, or record expected
+import arc.scene.ui.ButtonGroup;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:22: error: class, interface, enum, or record expected
+import arc.scene.ui.Label;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:23: error: class, interface, enum, or record expected
+import arc.scene.ui.TextButton;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:24: error: class, interface, enum, or record expected
+import arc.scene.ui.TextField;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:25: error: class, interface, enum, or record expected
+import arc.scene.ui.TextField.TextFieldFilter;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:26: error: class, interface, enum, or record expected
+import arc.scene.ui.layout.Scl;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:27: error: class, interface, enum, or record expected
+import arc.struct.IntSet;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:28: error: class, interface, enum, or record expected
+import arc.struct.LongMap;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:29: error: class, interface, enum, or record expected
+import arc.struct.Seq;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:30: error: class, interface, enum, or record expected
+import arc.util.Align;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:31: error: class, interface, enum, or record expected
+import arc.util.Log;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:32: error: class, interface, enum, or record expected
+import arc.util.Time;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:33: error: class, interface, enum, or record expected
+import arc.util.Tmp;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:34: error: class, interface, enum, or record expected
+import arc.util.pooling.Pools;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:35: error: class, interface, enum, or record expected
+import arc.util.serialization.Jval;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:36: error: class, interface, enum, or record expected
+import mindustry.Vars;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:37: error: class, interface, enum, or record expected
+import mindustry.content.StatusEffects;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:38: error: class, interface, enum, or record expected
+import mindustry.entities.Damage;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:39: error: class, interface, enum, or record expected
+import mindustry.entities.bullet.BulletType;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:40: error: class, interface, enum, or record expected
+import mindustry.game.EventType;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:41: error: class, interface, enum, or record expected
+import mindustry.game.Team;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:42: error: class, interface, enum, or record expected
+import mindustry.gen.Building;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:43: error: class, interface, enum, or record expected
+import mindustry.gen.Bullet;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:44: error: class, interface, enum, or record expected
+import mindustry.gen.Groups;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:45: error: class, interface, enum, or record expected
+import mindustry.gen.Unit;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:46: error: class, interface, enum, or record expected
+import mindustry.graphics.Drawf;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:47: error: class, interface, enum, or record expected
+import mindustry.graphics.Layer;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:48: error: class, interface, enum, or record expected
+import mindustry.graphics.Pal;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:49: error: class, interface, enum, or record expected
+import mindustry.mod.Mod;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:50: error: class, interface, enum, or record expected
+import mindustry.type.StatusEffect;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:51: error: class, interface, enum, or record expected
+import mindustry.ui.Fonts;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:52: error: class, interface, enum, or record expected
+import mindustry.ui.Styles;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:53: error: class, interface, enum, or record expected
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:54: error: class, interface, enum, or record expected
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.CheckSetting;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:55: error: class, interface, enum, or record expected
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.Setting;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:56: error: class, interface, enum, or record expected
+import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.SliderSetting;
+^
+/workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:58: error: class, interface, enum, or record expected
+import java.util.concurrent.ConcurrentHashMap;
+^
+56 errors
+
+[Incubating] Problems report is available at: file:///workspaces/Float-damage-text/build/reports/problems/problems-report.html
+
+FAILURE: Build failed with an exception.
+
+* What went wrong:
+Execution failed for task ':compileJava' (registered by plugin class 'org.gradle.api.plugins.JavaBasePlugin').
+> Compilation failed; see the compiler output below.
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:1: error: class, interface, enum, or record expected
+  .package damage_numbers;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:3: error: class, interface, enum, or record expected
+  import arc.Core;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:4: error: class, interface, enum, or record expected
+  import arc.Events;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:5: error: class, interface, enum, or record expected
+  import arc.files.Fi;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:6: error: class, interface, enum, or record expected
+  import arc.func.Cons;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:7: error: class, interface, enum, or record expected
+  import arc.graphics.Blending;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:8: error: class, interface, enum, or record expected
+  import arc.graphics.Color;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:9: error: class, interface, enum, or record expected
+  import arc.graphics.Pixmap;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:10: error: class, interface, enum, or record expected
+  import arc.graphics.Texture;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:11: error: class, interface, enum, or record expected
+  import arc.graphics.g2d.Draw;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:12: error: class, interface, enum, or record expected
+  import arc.graphics.g2d.Fill;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:13: error: class, interface, enum, or record expected
+  import arc.graphics.g2d.Font;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:14: error: class, interface, enum, or record expected
+  import arc.graphics.g2d.GlyphLayout;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:15: error: class, interface, enum, or record expected
+  import arc.graphics.g2d.Lines;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:16: error: class, interface, enum, or record expected
+  import arc.graphics.g2d.TextureRegion;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:17: error: class, interface, enum, or record expected
+  import arc.math.Mathf;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:18: error: class, interface, enum, or record expected
+  import arc.math.geom.Rect;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:19: error: class, interface, enum, or record expected
+  import arc.scene.style.Drawable;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:20: error: class, interface, enum, or record expected
+  import arc.scene.style.TextureRegionDrawable;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:21: error: class, interface, enum, or record expected
+  import arc.scene.ui.ButtonGroup;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:22: error: class, interface, enum, or record expected
+  import arc.scene.ui.Label;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:23: error: class, interface, enum, or record expected
+  import arc.scene.ui.TextButton;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:24: error: class, interface, enum, or record expected
+  import arc.scene.ui.TextField;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:25: error: class, interface, enum, or record expected
+  import arc.scene.ui.TextField.TextFieldFilter;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:26: error: class, interface, enum, or record expected
+  import arc.scene.ui.layout.Scl;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:27: error: class, interface, enum, or record expected
+  import arc.struct.IntSet;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:28: error: class, interface, enum, or record expected
+  import arc.struct.LongMap;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:29: error: class, interface, enum, or record expected
+  import arc.struct.Seq;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:30: error: class, interface, enum, or record expected
+  import arc.util.Align;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:31: error: class, interface, enum, or record expected
+  import arc.util.Log;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:32: error: class, interface, enum, or record expected
+  import arc.util.Time;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:33: error: class, interface, enum, or record expected
+  import arc.util.Tmp;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:34: error: class, interface, enum, or record expected
+  import arc.util.pooling.Pools;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:35: error: class, interface, enum, or record expected
+  import arc.util.serialization.Jval;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:36: error: class, interface, enum, or record expected
+  import mindustry.Vars;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:37: error: class, interface, enum, or record expected
+  import mindustry.content.StatusEffects;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:38: error: class, interface, enum, or record expected
+  import mindustry.entities.Damage;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:39: error: class, interface, enum, or record expected
+  import mindustry.entities.bullet.BulletType;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:40: error: class, interface, enum, or record expected
+  import mindustry.game.EventType;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:41: error: class, interface, enum, or record expected
+  import mindustry.game.Team;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:42: error: class, interface, enum, or record expected
+  import mindustry.gen.Building;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:43: error: class, interface, enum, or record expected
+  import mindustry.gen.Bullet;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:44: error: class, interface, enum, or record expected
+  import mindustry.gen.Groups;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:45: error: class, interface, enum, or record expected
+  import mindustry.gen.Unit;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:46: error: class, interface, enum, or record expected
+  import mindustry.graphics.Drawf;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:47: error: class, interface, enum, or record expected
+  import mindustry.graphics.Layer;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:48: error: class, interface, enum, or record expected
+  import mindustry.graphics.Pal;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:49: error: class, interface, enum, or record expected
+  import mindustry.mod.Mod;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:50: error: class, interface, enum, or record expected
+  import mindustry.type.StatusEffect;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:51: error: class, interface, enum, or record expected
+  import mindustry.ui.Fonts;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:52: error: class, interface, enum, or record expected
+  import mindustry.ui.Styles;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:53: error: class, interface, enum, or record expected
+  import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:54: error: class, interface, enum, or record expected
+  import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.CheckSetting;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:55: error: class, interface, enum, or record expected
+  import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.Setting;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:56: error: class, interface, enum, or record expected
+  import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.SliderSetting;
+  ^
+  /workspaces/Float-damage-text/src/example/main/java/DamageNumbersMod.java:58: error: class, interface, enum, or record expected
+  import java.util.concurrent.ConcurrentHashMap;
+  ^
+  56 errors
+
+* Try:
+> Check your code and dependencies to fix the compilation error(s)
+> Run with --scan to get full insights from a Build Scan (powered by Develocity).
+
+BUILD FAILED in 1s
+1 actionable task: 1 executed

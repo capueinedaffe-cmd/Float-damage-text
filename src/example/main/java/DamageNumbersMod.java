@@ -2,18 +2,27 @@ package damage_numbers;
 
 import arc.Core;
 import arc.Events;
+import arc.files.Fi;
 import arc.func.Cons;
+import arc.graphics.Blending;
 import arc.graphics.Color;
+import arc.graphics.Pixmap;
+import arc.graphics.Texture;
 import arc.graphics.g2d.Draw;
+import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Font;
 import arc.graphics.g2d.GlyphLayout;
+import arc.graphics.g2d.Lines;
 import arc.graphics.g2d.TextureRegion;
 import arc.math.Mathf;
 import arc.math.geom.Rect;
 import arc.scene.style.Drawable;
 import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.ButtonGroup;
+import arc.scene.ui.Label;
 import arc.scene.ui.TextButton;
+import arc.scene.ui.TextField;
+import arc.scene.ui.TextField.TextFieldFilter;
 import arc.scene.ui.layout.Scl;
 import arc.struct.IntSet;
 import arc.struct.LongMap;
@@ -94,6 +103,7 @@ public class DamageNumbersMod extends Mod {
     private static final String CONFIG_ICON_SPRITE = "configuration-icon";
     private static final String ANIMATION_ICON_SPRITE = "animation-effect-icon";
     private static final String DISPLACEMENT_ICON_SPRITE = "displacement-effect-icon";
+    private static final String DAMAGE_RENDER_ICON_SPRITE = "damage-render-icon";
     private static final String DAMAGE_TYPE_ICON_SPRITE = "icon-kinetic";
 
     // --- Efectos de animacion (tiempos en segundos, escalas como multiplicador) ---
@@ -116,6 +126,44 @@ public class DamageNumbersMod extends Mod {
     private static final float WAVE_PERIOD = 0.8f;         // Continuous wave: duracion de un zigzag completo
     private static final float SCATTER_DISTANCE = 30f;     // Random scatter: distancia a la que se queda
     private static final float SCATTER_SECONDS = 0.35f;    // Random scatter: tiempo en llegar a ese punto
+
+    // --- Efectos criticos (menu "Damage render") ---
+    private static final String KEY_CRIT_ENABLED = "damage-numbers-crit-enabled";
+    private static final String KEY_CRIT_FUSED = "damage-numbers-crit-threshold-fused";
+    private static final String KEY_CRIT_SINGLE = "damage-numbers-crit-threshold-single";
+    private static final String KEY_PARTICLE_LIMIT = "damage-numbers-particle-limit"; // "performance" | "regular" | "demanding" | "extreme"
+    private static final String KEY_PARTICLE_SCALE = "damage-numbers-particle-scale";
+    private static final String PARTICLE_LIMIT_DEFAULT = "regular";
+    private static final int CRIT_FUSED_DEFAULT = 5000, CRIT_SINGLE_DEFAULT = 500, CRIT_MAX = 999999;
+    private static final int PARTICLE_SCALE_DEFAULT = 100, PARTICLE_SCALE_MIN = 25, PARTICLE_SCALE_MAX = 300;
+
+    // --- Particulas: spritesheets en assets/particle-effects/ ---
+    // Cada efecto usa hasta 3 hojas: <efecto>-particles.png, <efecto>-particles-2.png y
+    // <efecto>-particles-3.png. Cada cuadro mide 120x120; 3 columnas de 10 cuadros que se
+    // leen de arriba a abajo y de izquierda a derecha (30 cuadros por hoja).
+    private static final String PARTICLE_DIR = "particle-effects";
+    private static final int PARTICLE_FRAME = 120;
+    private static final int PARTICLE_COLUMNS = 3, PARTICLE_ROWS = 10;
+    private static final float PARTICLE_BASE_SIZE = 10f;   // lado de un cuadro en unidades de mundo (texto tamano 2.0, escala 1, "Particle size" 100%)
+    private static final int PARTICLE_MAX_PER_TEXT = 24;   // tope de particulas simultaneas en un solo texto
+
+    // Efectos criticos disponibles (uno por estado de la bala). Los demas llegan en proximas entregas.
+    private static final int FX_NONE = 0, FX_MELTING = 1;
+    private static final String FX_MELTING_NAME = "melting";
+
+    // --- Melting: burbujas de lava en bucle, glow movil y texto "derretido" ---
+    private static final float MELT_LIFE_MIN = 0.5f, MELT_LIFE_MAX = 1f; // duracion de cada burbuja (segundos)
+    private static final int MELT_MIN_PARTICLES = 3;
+    private static final float MELT_GLOW_OFFSET = 0.45f;   // distancia del glow al texto (unidades, texto tamano 2.0)
+    private static final float MELT_GLOW_SPEED = 2.2f;     // velocidad con la que el glow da vueltas
+    private static final float MELT_WOBBLE_SPEED = 3.2f;   // velocidad del derretido de cada letra
+    private static final float MELT_COLOR_SPEED = 1.8f;    // velocidad con la que el color recorre el texto
+    private static final float MELT_DROOP = 0.8f;          // cuanto cae cada letra al derretirse
+    private static final Color MELT_RED = Color.valueOf("ff6b4a");
+    private static final Color MELT_ORANGE = Color.valueOf("ffa24a");
+    private static final Color MELT_YELLOW = Color.valueOf("fff0b0");
+    private static final Color MELT_GLOW_ORANGE = new Color(1f, 0.55f, 0.12f, 0.22f);
+    private static final Color MELT_GLOW_YELLOW = new Color(1f, 0.85f, 0.3f, 0.18f);
 
     // Tipos de objetivo/estado para las claves de fusion
     private static final int KIND_UNIT_DAMAGE = 1, KIND_BUILD_DAMAGE = 2, KIND_STATUS = 3;
@@ -163,12 +211,34 @@ public class DamageNumbersMod extends Mod {
         int displacement;
         float scatterAngle;
 
+        // Efecto critico (FX_*), sus particulas y el texto letra por letra (solo con efecto)
+        int critEffect = FX_NONE;
+        Seq<Particle> particles;
+        String[] charStrings;
+        float[] charX;               // inicio de cada letra respecto al borde izquierdo, a escala 1
+        final float fxSeed = Mathf.random(100f); // desfasa los movimientos de cada texto
+
         // Datos de fusion
         float sumRaw, sumTrue;       // dano acumulado (fusion de dano)
         boolean hasKey;
         long fusionKey;
     }
+
+    // Una particula de un efecto critico, ligada a un texto
+    private static class Particle {
+        float offX, offY;            // posicion respecto al centro del texto, a escala 1
+        float age, life;             // edad negativa = aun no nace
+        float sizeMul;               // variacion de tamano
+        int variant;                 // hoja elegida (-1 = burbuja de marcador)
+    }
     private final Seq<Popup> popups = new Seq<>();
+
+    // Estado de las particulas (se actualiza cada frame)
+    private float fxTime;                      // reloj de los efectos (no avanza en pausa)
+    private float particleSizeMul = 1f;
+    private int particleCap = Integer.MAX_VALUE;
+    private int liveParticles;
+    private final ConcurrentHashMap<String, TextureRegion[][]> sheetCache = new ConcurrentHashMap<>();
 
     // Como se ve un popup en un instante dado (lo calcula computePose)
     private static class Pose {
@@ -252,6 +322,17 @@ public class DamageNumbersMod extends Mod {
 
             Rect view = Core.camera.bounds(Tmp.r1);
 
+            // Ajustes de particulas (se leen una vez por frame) y total de particulas vivas
+            fxTime += dt;
+            particleSizeMul = readParticleSize();
+            particleCap = readParticleCap();
+            liveParticles = 0;
+            for (int i = 0; i < popups.size; i++) {
+                Seq<Particle> ps = popups.get(i).particles;
+                if (ps != null) liveParticles += ps.size;
+            }
+
+            // De los mas nuevos a los mas viejos: si se llega al tope, los nuevos tienen prioridad
             for (int i = popups.size - 1; i >= 0; i--) {
                 Popup p = popups.get(i);
 
@@ -284,7 +365,11 @@ public class DamageNumbersMod extends Mod {
                     Draw.reset();
                 }
 
-                drawText(p, p.anchorX + pose.dx + p.textDx * pose.scale, y, pose.scale, pose.alpha);
+                float textCx = p.anchorX + pose.dx + p.textDx * pose.scale;
+                if (p.critEffect == FX_MELTING) drawMeltingText(p, textCx, y, pose.scale, pose.alpha);
+                else drawText(p, textCx, y, pose.scale, pose.alpha);
+
+                if (p.critEffect != FX_NONE) updateParticles(p, dt, textCx, y, pose);
             }
 
             Draw.reset();
@@ -427,6 +512,15 @@ public class DamageNumbersMod extends Mod {
                         "Grow", "The text starts small, grows to its real size, and keeps growing near the end until it disappears."));
                 table.pref(check(KEY_ANIM_SHRINK, false,
                         "Shrink", "The text shrinks near the end until it disappears. Together with Grow, it starts small, reaches its real size and shrinks at the end."));
+
+                // Widget "Damage render": efectos criticos y particulas
+                table.pref(headerSetting("Damage render", DAMAGE_RENDER_ICON_SPRITE));
+                table.pref(check(KEY_CRIT_ENABLED, true,
+                        "Critical effects", "When the damage reaches the threshold, the text gets the effect of its bullet's status (particles, glow and text style)."));
+                table.pref(thresholdSetting());
+                table.pref(percentSlider(KEY_PARTICLE_SCALE, PARTICLE_SCALE_DEFAULT, PARTICLE_SCALE_MIN, PARTICLE_SCALE_MAX,
+                        "Particle size", "Size of the critical effect particles. They also follow the Text size setting."));
+                table.pref(particleLimitSetting());
             });
         } catch (Exception ex) {
             Log.err("[Damage Numbers] No se pudo crear el menu de ajustes: " + ex.getMessage());
@@ -530,6 +624,85 @@ public class DamageNumbersMod extends Mod {
         };
     }
 
+    // Umbral de dano para el efecto critico: un solo campo numerico que cambia de valor y de
+    // titulo segun "Damage text fusion" este activa (texto fusionado) o no.
+    private Setting thresholdSetting() {
+        Core.settings.defaults(KEY_CRIT_FUSED, CRIT_FUSED_DEFAULT);
+        Core.settings.defaults(KEY_CRIT_SINGLE, CRIT_SINGLE_DEFAULT);
+
+        return new Setting(KEY_CRIT_SINGLE) {
+            @Override
+            public void add(SettingsTable table) {
+                float width = Math.min(500f, Core.graphics.getWidth() / 1.2f / Scl.scl(1f));
+                int[] shownMode = {-1}; // -1 = aun no se mostro, 0 = sin fusion, 1 = fusionado
+
+                table.table(row -> {
+                    row.left();
+                    Label label = row.add("").left().growX().get();
+                    TextField field = row.field("", TextFieldFilter.digitsOnly, str -> {
+                        if (str.isEmpty()) return;
+                        try {
+                            int v = Mathf.clamp(Integer.parseInt(str), 1, CRIT_MAX);
+                            Core.settings.put(damageFusion() ? KEY_CRIT_FUSED : KEY_CRIT_SINGLE, v);
+                        } catch (NumberFormatException ignored) {
+                        }
+                    }).width(120f).padLeft(4f).get();
+
+                    // Cambia titulo y valor cuando se activa o desactiva la fusion de dano
+                    row.update(() -> {
+                        int mode = damageFusion() ? 1 : 0;
+                        if (mode == shownMode[0]) return;
+                        shownMode[0] = mode;
+                        label.setText(mode == 1 ? "Critical threshold (fused text)" : "Critical threshold (unfused text)");
+                        field.setText(String.valueOf(critThreshold(mode == 1)));
+                    });
+                }).width(width).left().padTop(4f).row();
+
+                table.add("Minimum damage for the critical effect to appear (1 to " + CRIT_MAX + "). "
+                                + "Fused text and unfused text each keep their own value; only the one that applies right now is shown.")
+                        .wrap().width(width).left().color(Color.lightGray).padTop(4f).padBottom(6f).row();
+            }
+        };
+    }
+
+    // Limite de particulas vivas a la vez: una lista de botones con su descripcion.
+    private Setting particleLimitSetting() {
+        Core.settings.defaults(KEY_PARTICLE_LIMIT, PARTICLE_LIMIT_DEFAULT);
+
+        return new Setting(KEY_PARTICLE_LIMIT) {
+            @Override
+            public void add(SettingsTable table) {
+                float width = Math.min(500f, Core.graphics.getWidth() / 1.2f / Scl.scl(1f));
+
+                table.add("Particle limit").left().padTop(10f).row();
+
+                ButtonGroup<TextButton> group = new ButtonGroup<>();
+                String[][] options = {
+                        {"Performance", "performance", "Up to 100 particles at once."},
+                        {"Regular", "regular", "Up to 300 particles at once."},
+                        {"Demanding", "demanding", "Up to 600 particles at once."},
+                        {"Extreme", "extreme", "No limit. It can slow the game down when many critical texts appear together."}
+                };
+                for (String[] option : options) {
+                    String value = option[1];
+                    table.button(option[0], Styles.flatTogglet, () -> Core.settings.put(KEY_PARTICLE_LIMIT, value))
+                            .group(group)
+                            .checked(b -> particleLimitMode().equals(value))
+                            .size(width, 40f).left().padTop(4f).row();
+                    table.add(option[2]).wrap().width(width).left().color(Color.lightGray).padTop(2f).padBottom(4f).row();
+                }
+            }
+        };
+    }
+
+    private SliderSetting percentSlider(String key, int def, int min, int max, String title, String description) {
+        Core.settings.defaults(key, def);
+        SliderSetting s = new SliderSetting(key, def, min, max, 5, i -> i + "%", null);
+        s.title = title;
+        s.description = description;
+        return s;
+    }
+
     private SliderSetting slider(String key, int def, int min, int max, String title, String description) {
         Core.settings.defaults(key, def);
         SliderSetting s = new SliderSetting(key, def, min, max, 1, i -> String.valueOf(i), null);
@@ -578,6 +751,37 @@ public class DamageNumbersMod extends Mod {
 
     private boolean statusFlood() {
         return Core.settings.getBool(KEY_STATUS_FLOOD, true);
+    }
+
+    private boolean critEnabled() {
+        return Core.settings.getBool(KEY_CRIT_ENABLED, true);
+    }
+
+    // Umbral de dano critico: "fused" para texto fusionado, o el de texto sin fusionar.
+    private int critThreshold(boolean fused) {
+        return Mathf.clamp(Core.settings.getInt(fused ? KEY_CRIT_FUSED : KEY_CRIT_SINGLE,
+                fused ? CRIT_FUSED_DEFAULT : CRIT_SINGLE_DEFAULT), 1, CRIT_MAX);
+    }
+
+    private String particleLimitMode() {
+        String v = Core.settings.getString(KEY_PARTICLE_LIMIT, PARTICLE_LIMIT_DEFAULT);
+        return (v.equals("performance") || v.equals("regular") || v.equals("demanding") || v.equals("extreme"))
+                ? v : PARTICLE_LIMIT_DEFAULT;
+    }
+
+    // Tope de particulas vivas a la vez segun el limite elegido.
+    private int readParticleCap() {
+        switch (particleLimitMode()) {
+            case "performance": return 100;
+            case "demanding": return 600;
+            case "extreme": return Integer.MAX_VALUE;
+            default: return 300;
+        }
+    }
+
+    private float readParticleSize() {
+        return Mathf.clamp(Core.settings.getInt(KEY_PARTICLE_SCALE, PARTICLE_SCALE_DEFAULT),
+                PARTICLE_SCALE_MIN, PARTICLE_SCALE_MAX) / 100f;
     }
 
     // Desplazamiento elegido en el menu: "standard", "ejection", "wave" o "scatter".
@@ -640,6 +844,7 @@ public class DamageNumbersMod extends Mod {
                 existing.sumTrue += trueDamage;
                 String text = formatDamageText(existing.sumRaw, existing.sumTrue);
                 layoutPopup(existing, text, teamColor(isAlly), pickIcon(type, existing.sumTrue), x, y);
+                applyCritical(existing, type, criticalValue(existing.sumRaw, existing.sumTrue), true);
                 return;
             }
 
@@ -650,10 +855,12 @@ public class DamageNumbersMod extends Mod {
             created.hasKey = true;
             created.fusionKey = key;
             fusionIndex.put(key, created);
+            applyCritical(created, type, criticalValue(raw, trueDamage), true);
             return;
         }
 
-        spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly), pickIcon(type, trueDamage), x, y);
+        Popup single = spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly), pickIcon(type, trueDamage), x, y);
+        applyCritical(single, type, criticalValue(raw, trueDamage), false);
     }
 
     // Texto de estado (mojado/alquitranado/congelante).
@@ -738,6 +945,7 @@ public class DamageNumbersMod extends Mod {
         p.anchorX = anchorX;
         p.anchorY = anchorY;
         p.age = 0f;
+        p.charStrings = null; // el texto pudo cambiar: se vuelve a medir letra por letra
 
         p.bounce = animBounce();
         p.fadeIn = animFadeIn();
@@ -859,6 +1067,268 @@ public class DamageNumbersMod extends Mod {
         font.getData().setScale(1f);
         font.setColor(Color.white);
         font.setUseIntegerPositions(ints);
+    }
+
+    // =====================================================================
+    //  Efectos criticos y particulas
+    // =====================================================================
+
+    // Numero que se compara con el umbral: el crudo en modo "raw"; en "true" y "both",
+    // el dano verdadero (lo que realmente se inflige).
+    private float criticalValue(float raw, float trueDamage) {
+        return damageMode().equals("raw") ? raw : trueDamage;
+    }
+
+    // Activa o quita el efecto critico de un texto segun su dano y el estado de su bala.
+    private void applyCritical(Popup p, BulletType type, float value, boolean fused) {
+        int effect = FX_NONE;
+        if (critEnabled() && value >= critThreshold(fused)) effect = critEffectFor(type);
+        if (p.critEffect != effect) {
+            p.critEffect = effect;
+            if (p.particles != null) {
+                liveParticles -= p.particles.size;
+                p.particles.clear();
+            }
+        }
+    }
+
+    // Efecto critico segun el estado de la bala (los demas estados llegan mas adelante).
+    private int critEffectFor(BulletType type) {
+        if (type != null && type.status == StatusEffects.melting) return FX_MELTING;
+        return FX_NONE;
+    }
+
+    // Hojas de particulas de un efecto: [variante][cuadro]. Si no hay ninguna devuelve un
+    // arreglo vacio y se dibujan burbujas de marcador. Se carga una sola vez por efecto.
+    private TextureRegion[][] particleFrames(String effect) {
+        TextureRegion[][] cached = sheetCache.get(effect);
+        if (cached != null) return cached;
+
+        Seq<TextureRegion[]> variants = new Seq<>();
+        try {
+            var mod = Vars.mods.getMod(MOD_NAME);
+            if (mod != null) {
+                Fi dir = mod.root.child(PARTICLE_DIR);
+                if (!dir.exists()) dir = mod.root.child("assets").child(PARTICLE_DIR);
+
+                String[] names = {effect + "-particles.png", effect + "-particles-2.png", effect + "-particles-3.png"};
+                for (String name : names) {
+                    Fi file = dir.child(name);
+                    if (!file.exists()) continue;
+
+                    Pixmap pix = new Pixmap(file);
+                    int cols = Math.min(PARTICLE_COLUMNS, pix.width / PARTICLE_FRAME);
+                    int rows = Math.min(PARTICLE_ROWS, pix.height / PARTICLE_FRAME);
+                    Texture tex = new Texture(pix);
+                    pix.dispose();
+                    tex.setFilter(Texture.TextureFilter.linear);
+
+                    // Lectura: de arriba a abajo dentro de cada columna, y luego la columna siguiente
+                    TextureRegion[] frames = new TextureRegion[cols * rows];
+                    for (int i = 0; i < frames.length; i++) {
+                        int col = i / rows, row = i % rows;
+                        frames[i] = new TextureRegion(tex, col * PARTICLE_FRAME, row * PARTICLE_FRAME,
+                                PARTICLE_FRAME, PARTICLE_FRAME);
+                    }
+                    if (frames.length > 0) variants.add(frames);
+                }
+            }
+        } catch (Exception ex) {
+            Log.err("[Damage Numbers] No se pudieron cargar las particulas de '" + effect + "': " + ex.getMessage());
+        }
+
+        if (variants.isEmpty()) {
+            Log.warn("[Damage Numbers] No se encontraron hojas de particulas para '" + effect
+                    + "'. Coloca " + effect + "-particles.png en assets/" + PARTICLE_DIR
+                    + "/ (mientras tanto se dibujan burbujas de marcador).");
+        }
+
+        TextureRegion[][] result = variants.toArray(TextureRegion[].class);
+        sheetCache.put(effect, result);
+        return result;
+    }
+
+    // Avanza, recicla y dibuja las particulas de un texto critico (cx, cy = centro del texto).
+    private void updateParticles(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.particles == null) p.particles = new Seq<>();
+
+        TextureRegion[][] sheets = particleFrames(FX_MELTING_NAME);
+        float size = PARTICLE_BASE_SIZE * (p.fontSize / 2f) * particleSizeMul;
+        // Mas ancho el texto (de 3 a 6 digitos), mas burbujas, repartidas a lo ancho
+        int target = Mathf.clamp(Math.round(p.textWidth / (size * 0.6f)), MELT_MIN_PARTICLES, PARTICLE_MAX_PER_TEXT);
+        float remaining = p.lifetime - p.age;
+        boolean canSpawn = remaining >= MELT_LIFE_MIN * 0.5f;
+
+        // Avanzar: al terminar su ciclo la burbuja renace en otro sitio (bucle) mientras al
+        // texto le quede vida; si no, desaparece.
+        for (int i = p.particles.size - 1; i >= 0; i--) {
+            Particle pt = p.particles.get(i);
+            pt.age += dt;
+            if (pt.age < pt.life) continue;
+
+            if (canSpawn && i < target && liveParticles <= particleCap) {
+                spawnMeltParticle(p, pt, i, target, size, remaining, sheets.length);
+            } else {
+                p.particles.remove(i);
+                liveParticles--;
+            }
+        }
+
+        // Reponer hasta el objetivo, respetando el limite global de particulas
+        while (canSpawn && p.particles.size < target && liveParticles < particleCap) {
+            Particle pt = new Particle();
+            spawnMeltParticle(p, pt, p.particles.size, target, size, remaining, sheets.length);
+            pt.age = -Mathf.random(MELT_LIFE_MAX); // nacen desfasadas para que no revienten a la vez
+            p.particles.add(pt);
+            liveParticles++;
+        }
+
+        // Dibujar
+        for (int i = 0; i < p.particles.size; i++) {
+            Particle pt = p.particles.get(i);
+            if (pt.age < 0f) continue;
+
+            float t = Mathf.clamp(pt.age / pt.life, 0f, 1f);
+            float px = cx + pt.offX * pose.scale;
+            float py = cy + pt.offY * pose.scale;
+            float s = size * pt.sizeMul * pose.scale;
+
+            if (pt.variant >= 0 && pt.variant < sheets.length) {
+                TextureRegion[] frames = sheets[pt.variant];
+                int idx = Math.min((int) (t * frames.length), frames.length - 1);
+                Draw.reset();
+                Draw.color(1f, 1f, 1f, pose.alpha);
+                Draw.rect(frames[idx], px, py, s, s);
+            } else {
+                drawPlaceholderBubble(px, py, s, t, pose.alpha);
+            }
+        }
+        Draw.reset();
+    }
+
+    // Coloca una burbuja de lava nueva: dentro de su "franja" a lo ancho del texto, a una altura al azar.
+    private void spawnMeltParticle(Popup p, Particle pt, int slot, int slots, float size, float remaining, int variants) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f + size * 0.15f;
+        float halfH = p.textHeight / 2f + size * 0.2f;
+        float slotW = halfW * 2f / n;
+
+        pt.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        pt.offY = Mathf.random(-halfH, halfH);
+        pt.sizeMul = Mathf.random(0.7f, 1.2f);
+        pt.life = Math.max(Math.min(Mathf.random(MELT_LIFE_MIN, MELT_LIFE_MAX), remaining), 0.05f);
+        pt.age = 0f;
+        pt.variant = variants > 0 ? Mathf.random(variants - 1) : -1;
+    }
+
+    // Burbuja de marcador (sin spritesheet): crece, y al final revienta en un aro que se desvanece.
+    private void drawPlaceholderBubble(float x, float y, float size, float t, float alpha) {
+        Draw.reset();
+        if (t < 0.65f) {
+            float k = t / 0.65f;
+            Draw.color(MELT_ORANGE, alpha * 0.85f);
+            Fill.circle(x, y, size * 0.28f * (0.4f + 0.6f * k));
+            Draw.color(MELT_YELLOW, alpha * 0.8f);
+            Fill.circle(x - size * 0.05f, y + size * 0.05f, size * 0.12f * k);
+        } else {
+            float k = (t - 0.65f) / 0.35f;
+            Draw.color(MELT_YELLOW, alpha * (1f - k));
+            Lines.stroke(Math.max(0.2f, size * 0.04f * (1f - k)));
+            Lines.circle(x, y, size * (0.3f + 0.25f * k));
+        }
+        Draw.reset();
+    }
+
+    // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
+    private void ensureCharLayout(Popup p) {
+        if (p.charStrings != null) return;
+
+        Font font = Fonts.outline;
+        GlyphLayout layout = Pools.obtain(GlyphLayout.class, GlyphLayout::new);
+
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * p.fontSize / Scl.scl(1f));
+
+        int n = p.text.length();
+        p.charStrings = new String[n];
+        p.charX = new float[n];
+        for (int i = 0; i < n; i++) {
+            p.charStrings[i] = String.valueOf(p.text.charAt(i));
+
+            // Inicio de la letra = ancho hasta ella (incluida) menos su propio ancho
+            layout.setText(font, p.text.substring(0, i + 1));
+            float upToHere = layout.width;
+            layout.setText(font, p.charStrings[i]);
+            p.charX[i] = Math.max(upToHere - layout.width, 0f);
+        }
+
+        Pools.free(layout);
+        font.getData().setScale(1f);
+        font.setUseIntegerPositions(ints);
+    }
+
+    // Color del texto derretido: rojo -> naranja -> amarillo claro, t de 0 a 1.
+    private void meltingPalette(float t, Color out) {
+        if (t < 0.5f) out.set(MELT_RED).lerp(MELT_ORANGE, t * 2f);
+        else out.set(MELT_ORANGE).lerp(MELT_YELLOW, (t - 0.5f) * 2f);
+    }
+
+    // Texto de Melting: glow naranja/amarillo que da vueltas detras, y cada letra con su color
+    // cambiante, cayendo y estirandose un poco como si se derritiera.
+    private void drawMeltingText(Popup p, float cx, float cy, float scale, float alpha) {
+        ensureCharLayout(p);
+        if (p.charStrings.length == 0) return;
+
+        Font font = Fonts.outline;
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+
+        float fs = 0.25f * p.fontSize * scale / Scl.scl(1f);
+        float sizeFactor = p.fontSize / 2f * scale;
+        float left = cx - p.textWidth * scale / 2f;
+        float top = cy + p.textHeight * scale / 2f;
+
+        float orbit = fxTime * MELT_GLOW_SPEED + p.fxSeed;
+        float ox = Mathf.cos(orbit) * MELT_GLOW_OFFSET * sizeFactor;
+        float oy = Mathf.sin(orbit) * MELT_GLOW_OFFSET * sizeFactor;
+
+        // Glow (suma luz; el contorno negro del texto no se nota al sumarse)
+        Draw.blend(Blending.additive);
+        drawMeltingChars(p, fs, scale, left, top, sizeFactor, ox, oy, MELT_GLOW_ORANGE, alpha);
+        drawMeltingChars(p, fs, scale, left, top, sizeFactor, -ox, -oy, MELT_GLOW_YELLOW, alpha);
+        Draw.blend();
+
+        // Texto
+        drawMeltingChars(p, fs, scale, left, top, sizeFactor, 0f, 0f, null, alpha);
+
+        font.getData().setScale(1f);
+        font.setColor(Color.white);
+        font.setUseIntegerPositions(ints);
+    }
+
+    // Dibuja las letras una a una. tint == null usa la paleta de Melting.
+    private void drawMeltingChars(Popup p, float fs, float scale, float left, float top, float sizeFactor,
+                                  float offX, float offY, Color tint, float alpha) {
+        Font font = Fonts.outline;
+        int n = p.charStrings.length;
+
+        for (int i = 0; i < n; i++) {
+            float d = 0.5f + 0.5f * Mathf.sin(fxTime * MELT_WOBBLE_SPEED + i * 1.3f + p.fxSeed); // 0..1
+            font.getData().setScale(fs * (1f - 0.05f * d), fs * (1f + 0.12f * d));
+
+            if (tint != null) {
+                drawColor.set(tint);
+            } else {
+                float t = 0.5f + 0.5f * Mathf.sin(fxTime * MELT_COLOR_SPEED + i * 0.8f + p.fxSeed);
+                meltingPalette(t, drawColor);
+            }
+            drawColor.a *= alpha;
+            font.setColor(drawColor);
+
+            font.draw(p.charStrings[i], left + p.charX[i] * scale + offX,
+                    top - d * MELT_DROOP * sizeFactor + offY, 0f, Align.left, false);
+        }
     }
 
     // Mide el texto a escala 1 (misma fuente y misma escala que usa el juego).
