@@ -156,9 +156,15 @@ public class DamageNumbersMod extends Mod {
     private static final int MELT_MIN_PARTICLES = 3;
     private static final float MELT_GLOW_OFFSET = 0.45f;   // distancia del glow al texto (unidades, texto tamano 2.0)
     private static final float MELT_GLOW_SPEED = 2.2f;     // velocidad con la que el glow da vueltas
-    private static final float MELT_WOBBLE_SPEED = 3.2f;   // velocidad del derretido de cada letra
+    private static final float MELT_WOBBLE_SPEED = 1.3f;   // velocidad del derretido de cada letra (baja = mas lento)
     private static final float MELT_COLOR_SPEED = 1.8f;    // velocidad con la que el color recorre el texto
     private static final float MELT_DROOP = 0.8f;          // cuanto cae cada letra al derretirse
+    // Destellos: puntos de luz suave sobre el texto que alternan entre rojo, naranja y amarillo
+    private static final float SPARK_LIFE_MIN = 0.6f, SPARK_LIFE_MAX = 1.4f; // duracion de cada destello (segundos)
+    private static final int SPARK_MIN = 4, SPARK_MAX = 16;
+    private static final float SPARK_SIZE = 0.9f;          // radio base (unidades, texto tamano 2.0)
+    private static final float SPARK_RISE = 1.5f;          // cuanto suben mientras brillan (unidades por segundo)
+    private static final float SPARK_COLOR_SPEED = 2.6f;   // velocidad con la que cambian de color
     private static final Color MELT_RED = Color.valueOf("ff6b4a");
     private static final Color MELT_ORANGE = Color.valueOf("ffa24a");
     private static final Color MELT_YELLOW = Color.valueOf("fff0b0");
@@ -214,6 +220,7 @@ public class DamageNumbersMod extends Mod {
         // Efecto critico (FX_*), sus particulas y el texto letra por letra (solo con efecto)
         int critEffect = FX_NONE;
         Seq<Particle> particles;
+        Seq<Particle> sparks;        // destellos de luz (cuentan para el limite de particulas)
         String[] charStrings;
         float[] charX;               // inicio de cada letra respecto al borde izquierdo, a escala 1
         final float fxSeed = Mathf.random(100f); // desfasa los movimientos de cada texto
@@ -230,6 +237,7 @@ public class DamageNumbersMod extends Mod {
         float age, life;             // edad negativa = aun no nace
         float sizeMul;               // variacion de tamano
         int variant;                 // hoja elegida (-1 = burbuja de marcador)
+        float phase;                 // desfase propio (color y parpadeo de los destellos)
     }
     private final Seq<Popup> popups = new Seq<>();
 
@@ -328,8 +336,9 @@ public class DamageNumbersMod extends Mod {
             particleCap = readParticleCap();
             liveParticles = 0;
             for (int i = 0; i < popups.size; i++) {
-                Seq<Particle> ps = popups.get(i).particles;
-                if (ps != null) liveParticles += ps.size;
+                Popup q = popups.get(i);
+                if (q.particles != null) liveParticles += q.particles.size;
+                if (q.sparks != null) liveParticles += q.sparks.size;
             }
 
             // De los mas nuevos a los mas viejos: si se llega al tope, los nuevos tienen prioridad
@@ -1089,6 +1098,10 @@ public class DamageNumbersMod extends Mod {
                 liveParticles -= p.particles.size;
                 p.particles.clear();
             }
+            if (p.sparks != null) {
+                liveParticles -= p.sparks.size;
+                p.sparks.clear();
+            }
         }
     }
 
@@ -1203,7 +1216,83 @@ public class DamageNumbersMod extends Mod {
                 drawPlaceholderBubble(px, py, s, t, pose.alpha);
             }
         }
+
+        updateSparks(p, dt, cx, cy, pose, size, remaining);
         Draw.reset();
+    }
+
+    // Destellos de Melting: puntos de luz suave sobre las letras. Nacen, suben un poco y se
+    // apagan, cambiando entre rojo, naranja y amarillo. Se dibujan sumando luz.
+    private void updateSparks(Popup p, float dt, float cx, float cy, Pose pose, float size, float remaining) {
+        if (p.sparks == null) p.sparks = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        int target = Mathf.clamp(Math.round(p.textWidth / (size * 0.45f)), SPARK_MIN, SPARK_MAX);
+        boolean canSpawn = remaining >= SPARK_LIFE_MIN * 0.5f;
+
+        for (int i = p.sparks.size - 1; i >= 0; i--) {
+            Particle sp = p.sparks.get(i);
+            sp.age += dt;
+            if (sp.age < sp.life) continue;
+
+            if (canSpawn && i < target && liveParticles <= particleCap) {
+                spawnSpark(p, sp, i, target, remaining);
+            } else {
+                p.sparks.remove(i);
+                liveParticles--;
+            }
+        }
+
+        while (canSpawn && p.sparks.size < target && liveParticles < particleCap) {
+            Particle sp = new Particle();
+            spawnSpark(p, sp, p.sparks.size, target, remaining);
+            sp.age = -Mathf.random(SPARK_LIFE_MAX); // nacen desfasados
+            p.sparks.add(sp);
+            liveParticles++;
+        }
+
+        Draw.blend(Blending.additive);
+        for (int i = 0; i < p.sparks.size; i++) {
+            Particle sp = p.sparks.get(i);
+            if (sp.age < 0f) continue;
+
+            float t = Mathf.clamp(sp.age / sp.life, 0f, 1f);
+            float fade = Mathf.sin(t * Mathf.PI);                                  // aparece y se apaga
+            float twinkle = 0.75f + 0.25f * Mathf.sin(fxTime * 9f + sp.phase * 3f); // parpadeo suave
+            float a = fade * twinkle * pose.alpha;
+            if (a <= 0.01f) continue;
+
+            meltingPalette(0.5f + 0.5f * Mathf.sin(fxTime * SPARK_COLOR_SPEED + sp.phase), drawColor);
+
+            float px = cx + sp.offX * pose.scale;
+            float py = cy + (sp.offY + sp.age * SPARK_RISE * sizeFactor) * pose.scale;
+            float r = SPARK_SIZE * sizeFactor * sp.sizeMul * pose.scale;
+
+            Draw.color(drawColor, a * 0.28f);
+            Fill.circle(px, py, r * 2.4f);       // halo
+            Draw.color(drawColor, a * 0.7f);
+            Fill.circle(px, py, r * 1.2f);       // luz
+            Draw.color(Color.white, a * 0.6f);
+            Fill.circle(px, py, r * 0.5f);       // centro brillante
+        }
+        Draw.blend();
+        Draw.reset();
+    }
+
+    // Coloca un destello nuevo en su franja a lo ancho del texto, a una altura al azar.
+    private void spawnSpark(Popup p, Particle sp, int slot, int slots, float remaining) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f;
+        float halfH = p.textHeight / 2f;
+        float slotW = halfW * 2f / n;
+
+        sp.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        sp.offY = Mathf.random(-halfH, halfH);
+        sp.sizeMul = Mathf.random(0.6f, 1.3f);
+        sp.phase = Mathf.random(Mathf.PI2);
+        sp.life = Math.max(Math.min(Mathf.random(SPARK_LIFE_MIN, SPARK_LIFE_MAX), remaining), 0.05f);
+        sp.age = 0f;
+        sp.variant = -1;
     }
 
     // Coloca una burbuja de lava nueva: dentro de su "franja" a lo ancho del texto, a una altura al azar.
