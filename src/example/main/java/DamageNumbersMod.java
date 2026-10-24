@@ -31,9 +31,13 @@ import arc.util.Tmp;
 import arc.util.pooling.Pools;
 import arc.util.serialization.Jval;
 import mindustry.Vars;
+import mindustry.content.Fx;
+import mindustry.content.Items;
+import mindustry.content.Liquids;
 import mindustry.content.StatusEffects;
 import mindustry.entities.Damage;
 import mindustry.entities.bullet.BulletType;
+import mindustry.entities.bullet.LiquidBulletType;
 import mindustry.game.EventType;
 import mindustry.game.Team;
 import mindustry.gen.Building;
@@ -42,8 +46,12 @@ import mindustry.gen.Groups;
 import mindustry.gen.Unit;
 import mindustry.graphics.Drawf;
 import mindustry.graphics.Layer;
+import mindustry.graphics.MultiPacker;
 import mindustry.graphics.Pal;
 import mindustry.mod.Mod;
+import mindustry.type.Category;
+import mindustry.type.ItemStack;
+import mindustry.type.Liquid;
 import mindustry.type.StatusEffect;
 import mindustry.ui.Fonts;
 import mindustry.ui.Styles;
@@ -51,6 +59,9 @@ import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.CheckSetting;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.Setting;
 import mindustry.ui.dialogs.SettingsMenuDialog.SettingsTable.SliderSetting;
+import mindustry.world.blocks.defense.turrets.LiquidTurret;
+import mindustry.world.draw.DrawTurret;
+import mindustry.world.meta.BuildVisibility;
 
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -201,8 +212,8 @@ public class DamageNumbersMod extends Mod {
     private boolean showAllyBuildingDamage = true;
     private boolean showEnemyBuildingDamage = true;
     private boolean showShieldNulled = true;
-    private float labelLifetimeTicks = 40f;
-    private float iconSize = 6f;
+    private float labelLifetimeTicks = 1f;
+    private float iconSize = 8f;
     private float holdSeconds = 0.15f;
     private float riseSpeed = 8f;
 
@@ -300,6 +311,83 @@ public class DamageNumbersMod extends Mod {
             curBulletIds.add(b.id);
         }
     };
+
+    // Torreta de pruebas (solo sandbox): dispara liquidos que si hacen dano, para poder probar
+    // los estados Tarred, Wet, Freezing y Corroded con los efectos criticos.
+    public static LiquidTurret devTurret;
+
+    private static final float DEV_TURRET_RANGE = 30f * 8f; // 30 casillas
+
+    // Proyectil de liquido de la torreta: 45 de dano y el estado del liquido.
+    private static LiquidBulletType devBullet(Liquid fluid, StatusEffect appliedStatus) {
+        return new LiquidBulletType(fluid) {{
+            damage = 45f;
+            speed = 4f;
+            lifetime = 64f;          // con 4 de velocidad y algo de friccion alcanza ~30 casillas
+            drag = 0.001f;
+            knockback = 0.8f;
+            puddleSize = 8f;
+            orbSize = 4f;
+            ammoMultiplier = 0.4f;
+            status = appliedStatus;
+            statusDuration = 60f * 4f;
+            layer = Layer.bullet - 2f;
+        }};
+    }
+
+    @Override
+    public void loadContent() {
+        devTurret = new LiquidTurret("dev-turret") {{
+            requirements(Category.turret, BuildVisibility.sandboxOnly, ItemStack.with(Items.copper, 1));
+            alwaysUnlocked = true;
+            localizedName = "Dev turret";
+            description = "Sandbox turret that fires liquid projectiles dealing damage. "
+                    + "Oil applies Tarred, Cryofluid applies Freezing, Water applies Wet and Arkycite applies Corroded.";
+
+            ammo(
+                    Liquids.oil, devBullet(Liquids.oil, StatusEffects.tarred),
+                    Liquids.cryofluid, devBullet(Liquids.cryofluid, StatusEffects.freezing),
+                    Liquids.water, devBullet(Liquids.water, StatusEffects.wet),
+                    Liquids.arkycite, devBullet(Liquids.arkycite, StatusEffects.corroded)
+            );
+
+            size = 3;
+            scaledHealth = 250f;
+            reload = 6f;             // un proyectil cada 6 ticks = 10 por segundo
+            inaccuracy = 3f;         // ligeramente dispersos
+            velocityRnd = 0.08f;
+            recoil = 1f;
+            shootCone = 45f;
+            liquidCapacity = 40f;
+            shootEffect = Fx.shootLiquid;
+            range = DEV_TURRET_RANGE;
+        }
+
+            // Usa los sprites de la tsunami de Mindustry (no lleva imagenes propias)
+            @Override
+            public void load() {
+                super.load();
+                region = Core.atlas.find("tsunami");
+                if (drawer instanceof DrawTurret d) {
+                    d.preview = region;
+                    d.top = Core.atlas.find("tsunami-top");
+                    d.liquid = Core.atlas.find("tsunami-liquid");
+                }
+            }
+
+            @Override
+            public void loadIcon() {
+                super.loadIcon();
+                fullIcon = Core.atlas.find("block-tsunami-full");
+                uiIcon = Core.atlas.find("block-tsunami-ui");
+            }
+
+            @Override
+            public void createIcons(MultiPacker packer) {
+                // Sin iconos propios: se usan los de la tsunami
+            }
+        };
+    }
 
     @Override
     public void init() {
