@@ -150,7 +150,7 @@ public class DamageNumbersMod extends Mod {
     private static final int PARTICLE_MAX_PER_TEXT = 24;   // tope de particulas simultaneas en un solo texto
 
     // Efectos criticos disponibles (uno por estado de la bala). Los demas llegan en proximas entregas.
-    private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2;
+    private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2, FX_CORRODED = 3;
 
     // --- Freezing: cristales de hielo en tres fases pulsantes, texto celeste y nieve ---
     // Fase 1: tres cristales pequenos. Fase 2: crecen y aparece otro pequeno. Fase 3: el central crece mas.
@@ -180,8 +180,29 @@ public class DamageNumbersMod extends Mod {
     private static final float SNOW_LIFE_MIN = 0.8f, SNOW_LIFE_MAX = 1.6f;
     private static final float SNOW_FALL = 5f;             // unidades por segundo (texto tamano 2.0)
     private static final float SNOW_SWAY = 0.9f;           // vaiven lateral
-    private static final float SNOW_ALPHA = 0.35f;
+    private static final float SNOW_ALPHA = 0.45f;
     private static final float SNOW_SIZE = 0.38f;          // radio base
+
+    // --- Corroded: texto y gases verde menta; glow en orbita y gotas que caen verde oliva ---
+    private static final Color TEXT_MINT = Color.valueOf("9bffcb");
+    private static final Color GLOW_OLIVE = new Color(0.63f, 0.69f, 0.13f, 0.30f);
+    private static final Color GLOW_OLIVE_SOFT = new Color(0.75f, 0.8f, 0.29f, 0.18f);
+    private static final Color GAS_MINT = Color.valueOf("8cffc4");
+    private static final Color DROP_OLIVE = Color.valueOf("9aa53a");
+    private static final float CORR_GLOW_OFFSET = 0.55f;   // distancia del glow al texto (unidades, texto tamano 2.0)
+    private static final float CORR_GLOW_SPEED = 1.6f;     // velocidad con la que el glow da vueltas
+    // Gases (verde menta): puffs circulares que salen de vez en cuando (pausa al azar entre uno y otro)
+    private static final float GAS_LIFE_MIN = 0.9f, GAS_LIFE_MAX = 1.6f;
+    private static final float GAS_DELAY_MAX = 1.1f;       // pausa maxima antes de que renazca un gas
+    private static final float GAS_SIZE = 0.28f;           // radio final (fraccion del tamano de referencia)
+    private static final float GAS_RISE = 3f;              // cuanto suben (unidades por segundo)
+    private static final float GAS_ALPHA = 0.32f;
+    // Gotas (verde oliva): se acumulan colgando del borde de abajo del texto, y al llegar a su tamano caen
+    private static final float DROP_LIFE_MIN = 0.9f, DROP_LIFE_MAX = 1.5f;
+    private static final float DROP_HANG = 0.55f;         // fraccion del ciclo que pasa colgando y creciendo
+    private static final float DROP_SIZE = 0.15f;          // radio final (fraccion del tamano de referencia)
+    private static final float DROP_FALL = 9f;             // distancia que caen (unidades, texto tamano 2.0)
+    private static final float DROP_ALPHA = 0.8f;
 
     // --- Melting: burbujas de lava en bucle, glow movil y texto "derretido" ---
     private static final float MELT_LIFE_MIN = 0.5f, MELT_LIFE_MAX = 1f; // duracion de cada burbuja (segundos)
@@ -212,7 +233,7 @@ public class DamageNumbersMod extends Mod {
     private boolean showAllyBuildingDamage = true;
     private boolean showEnemyBuildingDamage = true;
     private boolean showShieldNulled = true;
-    private float labelLifetimeTicks = 1f;
+    private float labelLifetimeTicks = 1.5f;
     private float iconSize = 8f;
     private float holdSeconds = 0.15f;
     private float riseSpeed = 8f;
@@ -473,7 +494,6 @@ public class DamageNumbersMod extends Mod {
                 if (!view.overlaps(x - reach, y - reach, reach * 2f, reach * 2f)) continue;
 
                 float textCx = p.anchorX + pose.dx + p.textDx * pose.scale;
-                if (p.critEffect == FX_FREEZING) drawIceCrystals(p, textCx, y, pose); // detras del icono y del texto
 
                 if (p.icon != null) {
                     // Reset ANTES de dibujar: limpia cualquier "mixcol" (tinte de
@@ -487,7 +507,11 @@ public class DamageNumbersMod extends Mod {
 
                 if (p.critEffect == FX_MELTING) drawMeltingText(p, textCx, y, pose.scale, pose.alpha);
                 else if (p.critEffect == FX_FREEZING) drawFrozenText(p, textCx, y, pose.scale, pose.alpha);
+                else if (p.critEffect == FX_CORRODED) drawCorrodedText(p, textCx, y, pose.scale, pose.alpha);
                 else drawText(p, textCx, y, pose.scale, pose.alpha);
+
+                // Los cristales de hielo van por delante del texto (al 50 % de opacidad)
+                if (p.critEffect == FX_FREEZING) drawIceCrystals(p, textCx, y, pose);
 
                 if (p.critEffect != FX_NONE) updateParticles(p, dt, textCx, y, pose);
             }
@@ -1225,6 +1249,7 @@ public class DamageNumbersMod extends Mod {
         if (type == null) return FX_NONE;
         if (type.status == StatusEffects.melting) return FX_MELTING;
         if (type.status == StatusEffects.freezing) return FX_FREEZING;
+        if (type.status == StatusEffects.corroded) return FX_CORRODED;
         return FX_NONE;
     }
 
@@ -1232,6 +1257,7 @@ public class DamageNumbersMod extends Mod {
     private void updateParticles(Popup p, float dt, float cx, float cy, Pose pose) {
         if (p.critEffect == FX_MELTING) updateMeltParticles(p, dt, cx, cy, pose);
         else if (p.critEffect == FX_FREEZING) updateSnow(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_CORRODED) updateCorrosion(p, dt, cx, cy, pose);
     }
 
     // Melting: burbujas de lava en bucle y destellos de luz.
@@ -1544,6 +1570,180 @@ public class DamageNumbersMod extends Mod {
         pt.phase = Mathf.random(Mathf.PI2);
         pt.life = Math.max(Math.min(Mathf.random(SNOW_LIFE_MIN, SNOW_LIFE_MAX), remaining), 0.05f);
         pt.age = 0f;
+    }
+
+    // Texto de Corroded: verde menta, con un glow verde oliva que da vueltas alrededor.
+    private void drawCorrodedText(Popup p, float cx, float cy, float scale, float alpha) {
+        Font font = Fonts.outline;
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * p.fontSize * scale / Scl.scl(1f));
+
+        float g = CORR_GLOW_OFFSET * (p.fontSize / 2f) * scale;
+        float orbit = fxTime * CORR_GLOW_SPEED + p.fxSeed;
+        float ox = Mathf.cos(orbit) * g;
+        float oy = Mathf.sin(orbit) * g * 0.7f;
+        float top = cy + p.textHeight * scale / 2f;
+
+        Draw.blend(Blending.additive);
+        drawColor.set(GLOW_OLIVE);
+        drawColor.a *= alpha;
+        font.setColor(drawColor);
+        font.draw(p.text, cx + ox, top + oy, 0f, Align.center, false);
+        drawColor.set(GLOW_OLIVE_SOFT);
+        drawColor.a *= alpha;
+        font.setColor(drawColor);
+        font.draw(p.text, cx - ox, top - oy, 0f, Align.center, false);
+        Draw.blend();
+
+        font.getData().setScale(1f);
+        font.setColor(Color.white);
+        font.setUseIntegerPositions(ints);
+
+        drawText(p, cx, cy, scale, alpha, TEXT_MINT);
+    }
+
+    // Corroded: gases (en particles) y gotas (en sparks). Los gases salen de vez en cuando y
+    // suben ensanchandose; las gotas cuelgan del borde de abajo del texto, crecen y caen.
+    private void updateCorrosion(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.particles == null) p.particles = new Seq<>();
+        if (p.sparks == null) p.sparks = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float remaining = p.lifetime - p.age;
+        boolean canSpawn = remaining >= GAS_LIFE_MIN * 0.5f;
+        int gasTarget = Mathf.clamp(Math.round(p.textWidth / (size * 0.9f)), 2, 8);
+        int dropTarget = Mathf.clamp(Math.round(p.textWidth / (size * 0.7f)), 2, 9);
+
+        // Gases
+        for (int i = p.particles.size - 1; i >= 0; i--) {
+            Particle pt = p.particles.get(i);
+            pt.age += dt;
+            if (pt.age < pt.life) continue;
+
+            if (canSpawn && i < gasTarget && liveParticles <= particleCap) {
+                spawnGas(p, pt, i, gasTarget, remaining, GAS_DELAY_MAX);
+            } else {
+                p.particles.remove(i);
+                liveParticles--;
+            }
+        }
+        while (canSpawn && p.particles.size < gasTarget && liveParticles < particleCap) {
+            Particle pt = new Particle();
+            spawnGas(p, pt, p.particles.size, gasTarget, remaining, GAS_DELAY_MAX * 1.5f);
+            p.particles.add(pt);
+            liveParticles++;
+        }
+
+        // Gotas
+        for (int i = p.sparks.size - 1; i >= 0; i--) {
+            Particle dp = p.sparks.get(i);
+            dp.age += dt;
+            if (dp.age < dp.life) continue;
+
+            if (canSpawn && i < dropTarget && liveParticles <= particleCap) {
+                spawnDrop(p, dp, i, dropTarget, remaining, 0.3f);
+            } else {
+                p.sparks.remove(i);
+                liveParticles--;
+            }
+        }
+        while (canSpawn && p.sparks.size < dropTarget && liveParticles < particleCap) {
+            Particle dp = new Particle();
+            spawnDrop(p, dp, p.sparks.size, dropTarget, remaining, DROP_LIFE_MAX * 0.6f);
+            p.sparks.add(dp);
+            liveParticles++;
+        }
+
+        // Dibujar gases
+        for (int i = 0; i < p.particles.size; i++) {
+            Particle pt = p.particles.get(i);
+            if (pt.age < 0f) continue;
+
+            float t = Mathf.clamp(pt.age / pt.life, 0f, 1f);
+            float a = GAS_ALPHA * Mathf.sin(t * Mathf.PI) * pose.alpha; // aparece y se disipa
+            if (a <= 0.01f) continue;
+
+            float gx = cx + (pt.offX + Mathf.sin(pt.age * 1.7f + pt.phase) * 0.6f * sizeFactor) * pose.scale;
+            float gy = cy + (pt.offY + pt.age * GAS_RISE * sizeFactor) * pose.scale;
+            float r = GAS_SIZE * size * pt.sizeMul * (0.35f + 0.65f * t) * pose.scale;
+
+            Draw.color(GAS_MINT, a);
+            Fill.circle(gx, gy, r);
+            Draw.color(GAS_MINT, a * 0.8f);
+            Fill.circle(gx + r * 0.2f, gy + r * 0.15f, r * 0.55f);
+        }
+
+        // Dibujar gotas
+        for (int i = 0; i < p.sparks.size; i++) {
+            Particle dp = p.sparks.get(i);
+            if (dp.age < 0f) continue;
+
+            float t = Mathf.clamp(dp.age / dp.life, 0f, 1f);
+            float r0 = DROP_SIZE * size * dp.sizeMul * pose.scale;
+            float x = cx + dp.offX * pose.scale;
+            float y;
+            float r;
+            float stretch;
+            float a = DROP_ALPHA * pose.alpha;
+
+            if (t < DROP_HANG) {
+                // Colgando: va creciendo, unida al texto por una colita
+                float k = t / DROP_HANG;
+                r = r0 * (0.25f + 0.75f * k);
+                stretch = 0.2f + 0.6f * k;
+                y = cy + dp.offY * pose.scale;
+            } else {
+                // Cayendo: acelera y se desvanece al final
+                float f = (t - DROP_HANG) / (1f - DROP_HANG);
+                r = r0;
+                stretch = 0.8f + 1.2f * f;
+                y = cy + dp.offY * pose.scale - DROP_FALL * sizeFactor * f * f * pose.scale;
+                if (f > 0.65f) a *= 1f - (f - 0.65f) / 0.35f;
+            }
+            if (a <= 0.01f) continue;
+            drawDrop(x, y, r, stretch, a);
+        }
+        Draw.reset();
+    }
+
+    // Una gota: circulo con colita hacia arriba y un brillo.
+    private void drawDrop(float x, float y, float r, float stretch, float alpha) {
+        Draw.color(DROP_OLIVE, alpha);
+        Fill.circle(x, y, r);
+        Fill.tri(x - r * 0.8f, y + r * 0.3f, x + r * 0.8f, y + r * 0.3f, x, y + r * (1.4f + stretch));
+        Draw.color(Color.white, alpha * 0.45f);
+        Fill.circle(x - r * 0.3f, y + r * 0.25f, r * 0.3f);
+    }
+
+    // Coloca un gas nuevo sobre el texto; nace tras una pausa al azar (maxDelay).
+    private void spawnGas(Popup p, Particle pt, int slot, int slots, float remaining, float maxDelay) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f;
+        float halfH = p.textHeight / 2f;
+        float slotW = halfW * 2f / n;
+
+        pt.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        pt.offY = Mathf.random(-halfH * 0.5f, halfH * 0.8f);
+        pt.sizeMul = Mathf.random(0.7f, 1.3f);
+        pt.phase = Mathf.random(Mathf.PI2);
+        pt.life = Math.max(Math.min(Mathf.random(GAS_LIFE_MIN, GAS_LIFE_MAX), remaining), 0.05f);
+        pt.age = -Mathf.random(maxDelay);
+    }
+
+    // Coloca una gota nueva colgando del borde de abajo del texto.
+    private void spawnDrop(Popup p, Particle dp, int slot, int slots, float remaining, float maxDelay) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f;
+        float slotW = halfW * 2f / n;
+
+        dp.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        dp.offY = -p.textHeight * 0.4f;
+        dp.sizeMul = Mathf.random(0.75f, 1.25f);
+        dp.phase = Mathf.random(Mathf.PI2);
+        dp.life = Math.max(Math.min(Mathf.random(DROP_LIFE_MIN, DROP_LIFE_MAX), remaining), 0.05f);
+        dp.age = -Mathf.random(maxDelay);
     }
 
     // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
