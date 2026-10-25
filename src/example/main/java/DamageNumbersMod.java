@@ -150,7 +150,7 @@ public class DamageNumbersMod extends Mod {
     private static final int PARTICLE_MAX_PER_TEXT = 24;   // tope de particulas simultaneas en un solo texto
 
     // Efectos criticos disponibles (uno por estado de la bala). Los demas llegan en proximas entregas.
-    private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2, FX_CORRODED = 3;
+    private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2, FX_CORRODED = 3, FX_WET = 4, FX_TARRED = 5;
 
     // --- Freezing: cristales de hielo en tres fases pulsantes, texto celeste y nieve ---
     // Fase 1: tres cristales pequenos. Fase 2: crecen y aparece otro pequeno. Fase 3: el central crece mas.
@@ -206,6 +206,53 @@ public class DamageNumbersMod extends Mod {
     private static final float DROP_SIZE = 0.06f;          // radio final (fraccion del tamano de referencia); son gotitas
     private static final float DROP_FALL = 2.5f;           // distancia que bajan (unidades, texto tamano 2.0)
     private static final float DROP_ALPHA = 0.95f;
+
+    // --- Wet: texto azul real, muchas burbujas casi quietas y gotas de agua que caen de vez en cuando ---
+    private static final Color TEXT_WET = Color.valueOf("4169e1");
+    private static final Color WET_BUBBLE = Color.valueOf("7a96ea");      // un poco mas claro que el texto
+    private static final Color WET_BUBBLE_DEEP = Color.valueOf("3552c4"); // azul del degradado de abajo a la derecha
+    private static final float WET_BUBBLE_ALPHA = 0.5f;
+    private static final float WET_BUBBLE_MIN = 0.05f, WET_BUBBLE_MAX = 0.11f; // radio (fraccion del tamano de referencia)
+    private static final float WET_WOBBLE = 0.22f;         // cuanto se mueven sin salirse de su punto (unidades, texto tamano 2.0)
+    private static final float WET_APPEAR_SECONDS = 0.25f; // cada burbuja nace creciendo
+    private static final float WET_APPEAR_MAX_DELAY = 0.35f;
+    private static final int WET_DETACH_MIN = 1, WET_DETACH_MAX = 3; // burbujas que se sueltan al acabarse el texto
+    private static final float WET_DETACH_LIFE_MIN = 0.3f, WET_DETACH_LIFE_MAX = 0.6f;
+    private static final float WET_DETACH_WOBBLE = 0.2f;   // movimiento de las burbujas sueltas (unidades)
+    private static final int WET_SEG = 10;                 // lados con los que se dibuja una burbuja
+    private static final float[] WET_COS = new float[WET_SEG], WET_SIN = new float[WET_SEG];
+    static {
+        for (int i = 0; i < WET_SEG; i++) {
+            WET_COS[i] = (float) Math.cos(i * Math.PI * 2.0 / WET_SEG);
+            WET_SIN[i] = (float) Math.sin(i * Math.PI * 2.0 / WET_SEG);
+        }
+    }
+    private static final float WETDROP_LIFE_MIN = 0.7f, WETDROP_LIFE_MAX = 1.1f;
+    private static final float WETDROP_DELAY_MAX = 1.2f;   // pausa maxima antes de que salga otra gota
+    private static final float WETDROP_GROW = 0.3f;        // fraccion del ciclo que pasa formandose
+    private static final float WETDROP_SIZE = 0.07f;       // radio final (fraccion del tamano de referencia)
+    private static final float WETDROP_FALL = 7f;          // distancia que caen (unidades, texto tamano 2.0)
+    private static final float WETDROP_ALPHA = 0.85f;
+
+    // --- Tarred: texto y brea 222222, movimiento a la mitad, letras a distinta velocidad y gotas que se aplastan ---
+    private static final Color TEXT_TAR = Color.valueOf("222222");
+    private static final float TAR_MOTION_SPEED = 0.5f;    // el desplazamiento y las animaciones van a la mitad
+    private static final float TAR_SPEED_VARIATION = 0.24f; // cada letra se desplaza entre -12 % y +12 % respecto al resto
+    private static final float TAR_LIFE_MIN = 1.1f, TAR_LIFE_MAX = 1.5f; // ciclo de una gota: formarse, caer, aplastarse
+    private static final float TAR_DELAY_MAX = 1.6f;       // pausa maxima antes de que salga otra gota (muy espaciadas)
+    private static final float TAR_FORM = 0.15f, TAR_FALL = 0.60f; // fracciones del ciclo; el resto es el aplastado en el suelo
+    private static final float TAR_DROP_SIZE = 0.09f;      // radio de la gota (fraccion del tamano de referencia)
+    private static final float TAR_GROUND = 4f;            // a cuanto queda el suelo ficticio, bajo el texto (unidades, texto tamano 2.0)
+    private static final float TAR_SPLAT_GROW = 1.3f;      // cuanto se ensancha el ovalo al aplastarse (veces el radio)
+    private static final float TAR_SPLAT_FLAT = 0.38f;     // alto del ovalo respecto a su ancho
+    private static final int TAR_SEG = 14;                 // lados con los que se dibuja un ovalo
+    private static final float[] TAR_COS = new float[TAR_SEG], TAR_SIN = new float[TAR_SEG];
+    static {
+        for (int i = 0; i < TAR_SEG; i++) {
+            TAR_COS[i] = (float) Math.cos(i * Math.PI * 2.0 / TAR_SEG);
+            TAR_SIN[i] = (float) Math.sin(i * Math.PI * 2.0 / TAR_SEG);
+        }
+    }
 
     // --- Melting: burbujas de lava en bucle, glow movil y texto "derretido" ---
     private static final float MELT_LIFE_MIN = 0.5f, MELT_LIFE_MAX = 1f; // duracion de cada burbuja (segundos)
@@ -279,6 +326,8 @@ public class DamageNumbersMod extends Mod {
         Seq<Particle> sparks;        // destellos de luz (cuentan para el limite de particulas)
         String[] charStrings;
         float[] charX;               // inicio de cada letra respecto al borde izquierdo, a escala 1
+        float[] charSpeed;           // multiplicador de desplazamiento de cada letra (Tarred)
+        float motionSpeed = 1f;      // 1 = normal; Tarred lo baja a la mitad
         final float fxSeed = Mathf.random(100f); // desfasa los movimientos de cada texto
 
         // Datos de fusion
@@ -302,6 +351,10 @@ public class DamageNumbersMod extends Mod {
     private int particleCap = Integer.MAX_VALUE;
     private int liveParticles;
     private final float[] dropPose = new float[4];
+    private final float[] wetRim = new float[WET_SEG];     // colores de las burbujas de Wet (ya con opacidad)
+    private float wetCenter;
+    private final Pose detachPose = new Pose();
+    private final Seq<Particle> orphanBubbles = new Seq<>(); // burbujas de Wet sueltas, en coordenadas de mundo
     private final float[] iceX = new float[6], iceY = new float[6], iceCl = new float[6], iceCr = new float[6];
 
     // Como se ve un popup en un instante dado (lo calcula computePose)
@@ -428,6 +481,7 @@ public class DamageNumbersMod extends Mod {
         // Al cargar un mapa nuevo todas las entidades desaparecen: reiniciamos el estado
         Events.on(EventType.WorldLoadEvent.class, e -> {
             popups.clear();
+            orphanBubbles.clear();
             fusionIndex.clear();
             statusMarks.clear();
             statusMarkIndex.clear();
@@ -449,7 +503,7 @@ public class DamageNumbersMod extends Mod {
         // Dibujamos nosotros el texto (ya no usamos WorldLabel) para controlar su
         // posicion, tamano y opacidad en cada cuadro.
         Events.run(EventType.Trigger.drawOver, () -> {
-            if (popups.isEmpty()) return;
+            if (popups.isEmpty() && orphanBubbles.isEmpty()) return;
 
             // En pausa el tiempo no avanza: todo se queda congelado (sin flotar ni
             // desaparecer), pero se sigue dibujando para que no se esfume.
@@ -480,6 +534,7 @@ public class DamageNumbersMod extends Mod {
 
                 p.age += dt;
                 if (p.age >= p.lifetime) {
+                    if (p.critEffect == FX_WET) detachWetBubbles(p);
                     releasePopup(p);
                     popups.remove(i);
                     continue;
@@ -512,12 +567,33 @@ public class DamageNumbersMod extends Mod {
                 if (p.critEffect == FX_MELTING) drawMeltingText(p, textCx, y, pose.scale, pose.alpha);
                 else if (p.critEffect == FX_FREEZING) drawFrozenText(p, textCx, y, pose.scale, pose.alpha);
                 else if (p.critEffect == FX_CORRODED) drawCorrodedText(p, textCx, y, pose.scale, pose.alpha);
+                else if (p.critEffect == FX_WET) drawText(p, textCx, y, pose.scale, pose.alpha, TEXT_WET);
+                else if (p.critEffect == FX_TARRED) drawTarredText(p, textCx, y, pose);
                 else drawText(p, textCx, y, pose.scale, pose.alpha);
 
                 // Los cristales de hielo van por delante del texto (al 50 % de opacidad)
                 if (p.critEffect == FX_FREEZING) drawIceCrystals(p, textCx, y, pose);
 
                 if (p.critEffect != FX_NONE) updateParticles(p, dt, textCx, y, pose);
+            }
+
+            // Burbujas de Wet que se soltaron del texto: viven un instante mas y desaparecen de golpe
+            if (!orphanBubbles.isEmpty()) {
+                setWetColors(WET_BUBBLE_ALPHA);
+                for (int i = orphanBubbles.size - 1; i >= 0; i--) {
+                    Particle o = orphanBubbles.get(i);
+                    o.age += dt;
+                    if (o.age >= o.life) {
+                        orphanBubbles.remove(i);
+                        continue;
+                    }
+                    float ox = o.offX + Mathf.sin(fxTime * 1.6f + o.phase) * WET_DETACH_WOBBLE;
+                    float oy = o.offY + Mathf.cos(fxTime * 1.3f + o.phase * 1.7f) * WET_DETACH_WOBBLE;
+                    if (view.overlaps(ox - o.sizeMul, oy - o.sizeMul, o.sizeMul * 2f, o.sizeMul * 2f)) {
+                        drawWetBubble(ox, oy, o.sizeMul, 1f);
+                    }
+                }
+                Draw.reset();
             }
 
             Draw.reset();
@@ -1130,27 +1206,31 @@ public class DamageNumbersMod extends Mod {
     // El desplazamiento es uno solo (el elegido en el menu); los efectos de animacion
     // se pueden combinar entre si y con cualquier desplazamiento.
     private void computePose(Popup p, Pose out) {
+        // Reloj del movimiento y de las animaciones (Tarred lo hace correr a la mitad). Los
+        // finales de vida (desvanecer, encoger) siguen la vida real del texto.
+        float ta = p.age * p.motionSpeed;
+
         switch (p.displacement) {
             case DISP_EJECTION: {
                 // Parabola hacia arriba y a la derecha que termina cayendo por debajo del origen.
                 float apexTime = Math.max(EJECT_APEX_TIME * p.lifetime, 0.01f);
                 float vy = 2f * EJECT_APEX_HEIGHT / apexTime;
                 float gravity = vy / apexTime;
-                out.dx = EJECT_DISTANCE * (p.age / p.lifetime);
-                out.dy = vy * p.age - 0.5f * gravity * p.age * p.age;
+                out.dx = EJECT_DISTANCE * (ta / p.lifetime);
+                out.dy = vy * ta - 0.5f * gravity * ta * ta;
                 break;
             }
             case DISP_WAVE: {
                 // Zigzag horizontal suave (coseno): arranca a la derecha y va hacia la izquierda,
                 // frena en cada extremo y recupera la velocidad al cruzar el centro, como un
                 // vehiculo tomando curvas. Mientras tanto sube como el desplazamiento Standard.
-                out.dx = WAVE_AMPLITUDE * Mathf.cos(p.age / WAVE_PERIOD * Mathf.PI2);
-                out.dy = Math.max(0f, p.age - holdSeconds) * riseSpeed;
+                out.dx = WAVE_AMPLITUDE * Mathf.cos(ta / WAVE_PERIOD * Mathf.PI2);
+                out.dy = Math.max(0f, ta - holdSeconds) * riseSpeed;
                 break;
             }
             case DISP_SCATTER: {
                 // Sale del centro en una direccion al azar, frena al llegar y se queda quieto.
-                float t = Mathf.clamp(p.age / SCATTER_SECONDS, 0f, 1f);
+                float t = Mathf.clamp(ta / SCATTER_SECONDS, 0f, 1f);
                 float eased = 1f - (1f - t) * (1f - t);
                 out.dx = Mathf.cos(p.scatterAngle) * SCATTER_DISTANCE * eased;
                 out.dy = Mathf.sin(p.scatterAngle) * SCATTER_DISTANCE * eased;
@@ -1158,7 +1238,7 @@ public class DamageNumbersMod extends Mod {
             }
             default: {
                 out.dx = 0f;
-                out.dy = Math.max(0f, p.age - holdSeconds) * riseSpeed;
+                out.dy = Math.max(0f, ta - holdSeconds) * riseSpeed;
             }
         }
 
@@ -1166,7 +1246,7 @@ public class DamageNumbersMod extends Mod {
 
         // --- Opacidad: Fade in (al inicio) y Fade out (al final) ---
         float alpha = 1f;
-        if (p.fadeIn) alpha = Math.min(alpha, Mathf.clamp(p.age / FADE_IN_SECONDS, 0f, 1f));
+        if (p.fadeIn) alpha = Math.min(alpha, Mathf.clamp(ta / FADE_IN_SECONDS, 0f, 1f));
         if (p.fadeOut) alpha = Math.min(alpha, Mathf.clamp(left / FADE_OUT_SECONDS, 0f, 1f));
         out.alpha = alpha;
 
@@ -1176,8 +1256,8 @@ public class DamageNumbersMod extends Mod {
         float endWindow = Math.min(END_EFFECT_SECONDS, p.lifetime / 2f);
 
         // Inicio: con Grow nace pequeno y llega al tamano real
-        if (p.grow && p.age < introWindow) {
-            scale = Mathf.lerp(GROW_START_SCALE, 1f, Mathf.clamp(p.age / introWindow, 0f, 1f));
+        if (p.grow && ta < introWindow) {
+            scale = Mathf.lerp(GROW_START_SCALE, 1f, Mathf.clamp(ta / introWindow, 0f, 1f));
         }
 
         // Final: Shrink se encoge hasta 0; Grow (sin Shrink) sigue agrandandose
@@ -1189,7 +1269,7 @@ public class DamageNumbersMod extends Mod {
 
         // Bounce: 1.0 -> 1.4 -> 1.0 en bucle, multiplica al resto
         if (p.bounce) {
-            float pulse = 0.5f - 0.5f * Mathf.cos(p.age / BOUNCE_PERIOD * Mathf.PI2);
+            float pulse = 0.5f - 0.5f * Mathf.cos(ta / BOUNCE_PERIOD * Mathf.PI2);
             scale *= 1f + (BOUNCE_MAX_SCALE - 1f) * pulse;
         }
 
@@ -1235,6 +1315,7 @@ public class DamageNumbersMod extends Mod {
     private void applyCritical(Popup p, BulletType type, float value, boolean fused) {
         int effect = FX_NONE;
         if (critEnabled() && value >= critThreshold(fused)) effect = critEffectFor(type);
+        p.motionSpeed = effect == FX_TARRED ? TAR_MOTION_SPEED : 1f; // Tarred: todo va a la mitad
         if (p.critEffect != effect) {
             p.critEffect = effect;
             if (p.particles != null) {
@@ -1254,6 +1335,8 @@ public class DamageNumbersMod extends Mod {
         if (type.status == StatusEffects.melting) return FX_MELTING;
         if (type.status == StatusEffects.freezing) return FX_FREEZING;
         if (type.status == StatusEffects.corroded) return FX_CORRODED;
+        if (type.status == StatusEffects.wet) return FX_WET;
+        if (type.status == StatusEffects.tarred) return FX_TARRED;
         return FX_NONE;
     }
 
@@ -1262,6 +1345,8 @@ public class DamageNumbersMod extends Mod {
         if (p.critEffect == FX_MELTING) updateMeltParticles(p, dt, cx, cy, pose);
         else if (p.critEffect == FX_FREEZING) updateSnow(p, dt, cx, cy, pose);
         else if (p.critEffect == FX_CORRODED) updateCorrosion(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_WET) updateWet(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_TARRED) updateTar(p, dt, cx, cy, pose);
     }
 
     // Melting: burbujas de lava en bucle y destellos de luz.
@@ -1702,28 +1787,34 @@ public class DamageNumbersMod extends Mod {
         Draw.reset();
     }
 
-    // Estado de una gota en este instante, en dropPose: [0] y, [1] radio, [2] cola, [3] opacidad.
-    // Primero crece muy despacio sobre la letra; despues baja lentisimo y se desvanece al final.
-    // Devuelve false si no hay nada que dibujar.
+    // Estado de una gota de Corroded en este instante (ver la version con parametros).
     private boolean computeDrop(Particle dp, float cy, Pose pose, float size, float sizeFactor) {
+        return computeDrop(dp, cy, pose, size, sizeFactor, DROP_GROW, DROP_SIZE, DROP_FALL, DROP_ALPHA);
+    }
+
+    // Estado de una gota en este instante, en dropPose: [0] y, [1] radio, [2] cola, [3] opacidad.
+    // Primero crece (grow = fraccion del ciclo); despues cae acelerando y se desvanece al final.
+    // Devuelve false si no hay nada que dibujar.
+    private boolean computeDrop(Particle dp, float cy, Pose pose, float size, float sizeFactor,
+                                float grow, float sizeFrac, float fall, float alphaBase) {
         if (dp.age < 0f) return false;
 
         float t = Mathf.clamp(dp.age / dp.life, 0f, 1f);
-        float r0 = DROP_SIZE * size * dp.sizeMul * pose.scale;
-        float a = DROP_ALPHA * pose.alpha;
+        float r0 = sizeFrac * size * dp.sizeMul * pose.scale;
+        float a = alphaBase * pose.alpha;
         float y = cy + dp.offY * pose.scale;
         float r, stretch;
 
-        if (t < DROP_GROW) {
-            float k = t / DROP_GROW;
+        if (t < grow) {
+            float k = t / grow;
             k = k * k * (3f - 2f * k); // arranca y termina de crecer suavemente
             r = r0 * k;
             stretch = 0.1f + 0.3f * k;
         } else {
-            float f = (t - DROP_GROW) / (1f - DROP_GROW);
+            float f = (t - grow) / (1f - grow);
             r = r0;
             stretch = 0.4f + 0.6f * f;
-            y -= DROP_FALL * sizeFactor * f * f * pose.scale;
+            y -= fall * sizeFactor * f * f * pose.scale;
             if (f > 0.7f) a *= 1f - (f - 0.7f) / 0.3f;
         }
 
@@ -1771,6 +1862,302 @@ public class DamageNumbersMod extends Mod {
         dp.age = -Mathf.random(maxDelay);
     }
 
+    // ---------------------------------------------------------------------
+    //  Wet
+    // ---------------------------------------------------------------------
+
+    // Prepara los colores de una burbuja de Wet: celeste claro en el centro y un degradado azul
+    // hacia la parte de abajo a la derecha (da volumen). alpha = opacidad de la burbuja.
+    private void setWetColors(float alpha) {
+        Tmp.c1.set(WET_BUBBLE);
+        wetCenter = Color.toFloatBits(Tmp.c1.r, Tmp.c1.g, Tmp.c1.b, alpha);
+        for (int i = 0; i < WET_SEG; i++) {
+            // 1 en la esquina de abajo a la derecha (-45 grados), 0 en la de arriba a la izquierda
+            float shade = 0.5f + 0.5f * (float) Math.cos(i * Math.PI * 2.0 / WET_SEG + Math.PI / 4.0);
+            shade *= shade;
+            Tmp.c1.set(WET_BUBBLE).lerp(WET_BUBBLE_DEEP, shade);
+            wetRim[i] = Color.toFloatBits(Tmp.c1.r, Tmp.c1.g, Tmp.c1.b, alpha);
+        }
+    }
+
+    // Una burbuja: abanico de triangulos con degradado y dos puntos blancos de luz.
+    // Antes hay que llamar a setWetColors. lightAlpha = visibilidad de los puntos de luz.
+    private void drawWetBubble(float x, float y, float r, float lightAlpha) {
+        if (r < 0.05f) return;
+
+        for (int i = 0; i < WET_SEG; i++) {
+            int j = (i + 1) % WET_SEG;
+            Fill.quad(x, y, wetCenter,
+                    x + WET_COS[i] * r, y + WET_SIN[i] * r, wetRim[i],
+                    x + WET_COS[j] * r, y + WET_SIN[j] * r, wetRim[j],
+                    x, y, wetCenter);
+        }
+
+        Draw.color(Color.white, lightAlpha * 0.9f);
+        Fill.circle(x - r * 0.35f, y + r * 0.38f, r * 0.22f);
+        Draw.color(Color.white, lightAlpha * 0.55f);
+        Fill.circle(x + r * 0.35f, y - r * 0.42f, r * 0.09f);
+    }
+
+    // Wet: muchas burbujas casi quietas en su punto (sin renacer) y gotas de agua que caen
+    // de vez en cuando. Las burbujas van en particles y las gotas en sparks.
+    private void updateWet(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.particles == null) p.particles = new Seq<>();
+        if (p.sparks == null) p.sparks = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float remaining = p.lifetime - p.age;
+
+        // Burbujas: se reponen solo si el texto se hizo mas ancho o si habia limite de particulas
+        int bubbleTarget = Mathf.clamp(Math.round(p.textWidth / (size * 0.18f)), 10, 30);
+        while (p.particles.size < bubbleTarget && liveParticles < particleCap) {
+            Particle b = new Particle();
+            spawnWetBubble(p, b, p.particles.size, bubbleTarget, size);
+            p.particles.add(b);
+            liveParticles++;
+        }
+
+        setWetColors(WET_BUBBLE_ALPHA * pose.alpha);
+        float wobble = WET_WOBBLE * sizeFactor;
+        for (int i = 0; i < p.particles.size; i++) {
+            Particle b = p.particles.get(i);
+            b.age += dt;
+            if (b.age <= 0f) continue;
+
+            float k = Mathf.clamp(b.age / WET_APPEAR_SECONDS, 0f, 1f);
+            k = 1f - (1f - k) * (1f - k); // nace creciendo
+            float bx = cx + (b.offX + Mathf.sin(fxTime * 1.3f + b.phase) * wobble) * pose.scale;
+            float by = cy + (b.offY + Mathf.cos(fxTime * 1.1f + b.phase * 1.7f) * wobble) * pose.scale;
+            drawWetBubble(bx, by, b.sizeMul * size * k * pose.scale, pose.alpha);
+        }
+
+        // Gotas de agua (salen de vez en cuando)
+        int dropTarget = Mathf.clamp(Math.round(p.textWidth / (size * 0.5f)), 2, 7);
+        boolean canSpawn = remaining >= WETDROP_LIFE_MIN * 0.5f;
+
+        for (int i = p.sparks.size - 1; i >= 0; i--) {
+            Particle dp = p.sparks.get(i);
+            dp.age += dt;
+            if (dp.age < dp.life) continue;
+
+            if (canSpawn && i < dropTarget && liveParticles <= particleCap) {
+                spawnWaterDrop(p, dp, i, dropTarget, remaining, WETDROP_DELAY_MAX);
+            } else {
+                p.sparks.remove(i);
+                liveParticles--;
+            }
+        }
+        while (canSpawn && p.sparks.size < dropTarget && liveParticles < particleCap) {
+            Particle dp = new Particle();
+            spawnWaterDrop(p, dp, p.sparks.size, dropTarget, remaining, WETDROP_DELAY_MAX * 1.5f);
+            p.sparks.add(dp);
+            liveParticles++;
+        }
+
+        for (int i = 0; i < p.sparks.size; i++) {
+            Particle dp = p.sparks.get(i);
+            if (!computeDrop(dp, cy, pose, size, sizeFactor, WETDROP_GROW, WETDROP_SIZE, WETDROP_FALL, WETDROP_ALPHA)) continue;
+            drawWaterDrop(cx + dp.offX * pose.scale, dropPose[0], dropPose[1], dropPose[2], dropPose[3]);
+        }
+        Draw.reset();
+    }
+
+    // Una gota de agua: color de las burbujas, con colita y un punto de luz.
+    private void drawWaterDrop(float x, float y, float r, float stretch, float alpha) {
+        Draw.color(WET_BUBBLE, alpha);
+        Fill.circle(x, y, r);
+        Fill.tri(x - r * 0.8f, y + r * 0.3f, x + r * 0.8f, y + r * 0.3f, x, y + r * (1.4f + stretch));
+        Draw.color(Color.white, alpha * 0.8f);
+        Fill.circle(x - r * 0.3f, y + r * 0.25f, r * 0.28f);
+    }
+
+    // Coloca una burbuja en su punto sobre (o apenas fuera de) las letras; nace tras un breve retraso.
+    private void spawnWetBubble(Popup p, Particle b, int slot, int slots, float size) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f + size * 0.1f;
+        float halfH = p.textHeight / 2f + size * 0.12f;
+        float slotW = halfW * 2f / n;
+
+        b.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        b.offY = Mathf.random(-halfH, halfH);
+        b.sizeMul = Mathf.random(WET_BUBBLE_MIN, WET_BUBBLE_MAX);
+        b.phase = Mathf.random(Mathf.PI2);
+        b.life = Float.MAX_VALUE; // dura lo que el texto
+        b.age = -Mathf.random(WET_APPEAR_MAX_DELAY);
+    }
+
+    // Coloca una gota de agua en la parte de abajo del texto; nace tras una pausa al azar.
+    private void spawnWaterDrop(Popup p, Particle dp, int slot, int slots, float remaining, float maxDelay) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f;
+        float slotW = halfW * 2f / n;
+
+        dp.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        dp.offY = Mathf.random(-p.textHeight * 0.45f, 0f);
+        dp.sizeMul = Mathf.random(0.8f, 1.25f);
+        dp.phase = Mathf.random(Mathf.PI2);
+        dp.life = Math.max(Math.min(Mathf.random(WETDROP_LIFE_MIN, WETDROP_LIFE_MAX), remaining), 0.05f);
+        dp.age = -Mathf.random(maxDelay);
+    }
+
+    // Cuando el texto de Wet se acaba, entre 1 y 3 burbujas se sueltan: se quedan donde estaban,
+    // se mueven apenas y desaparecen de golpe a los 0.3 a 0.6 s. El resto se va con el texto.
+    private void detachWetBubbles(Popup p) {
+        if (p.particles == null || p.particles.isEmpty()) return;
+
+        computePose(p, detachPose);
+        float sc = detachPose.scale < 0.05f ? 1f : detachPose.scale;
+        float cx = p.anchorX + detachPose.dx + p.textDx * sc;
+        float cy = p.anchorY + detachPose.dy;
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float wobble = WET_WOBBLE * sizeFactor;
+
+        Seq<Particle> visible = p.particles.select(b -> b.age > 0f);
+        int count = Math.min(Mathf.random(WET_DETACH_MIN, WET_DETACH_MAX), visible.size);
+        for (int n = 0; n < count; n++) {
+            Particle b = visible.remove(Mathf.random(visible.size - 1));
+
+            Particle o = new Particle();
+            o.offX = cx + (b.offX + Mathf.sin(fxTime * 1.3f + b.phase) * wobble) * sc;
+            o.offY = cy + (b.offY + Mathf.cos(fxTime * 1.1f + b.phase * 1.7f) * wobble) * sc;
+            o.sizeMul = b.sizeMul * size * sc; // aqui es el radio final, en unidades de mundo
+            o.phase = b.phase;
+            o.age = 0f;
+            o.life = Mathf.random(WET_DETACH_LIFE_MIN, WET_DETACH_LIFE_MAX);
+            orphanBubbles.add(o);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    //  Tarred
+    // ---------------------------------------------------------------------
+
+    // Texto de Tarred: oscuro, dibujado letra por letra. Cada letra se desplaza con una velocidad
+    // ligeramente distinta, asi que con el tiempo se van separando un poco.
+    private void drawTarredText(Popup p, float cx, float cy, Pose pose) {
+        ensureCharLayout(p);
+        if (p.charStrings.length == 0) return;
+
+        Font font = Fonts.outline;
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * p.fontSize * pose.scale / Scl.scl(1f));
+
+        drawColor.set(TEXT_TAR);
+        drawColor.a *= pose.alpha;
+        font.setColor(drawColor);
+
+        float left = cx - p.textWidth * pose.scale / 2f;
+        float top = cy + p.textHeight * pose.scale / 2f;
+        for (int i = 0; i < p.charStrings.length; i++) {
+            float extra = p.charSpeed[i] - 1f; // diferencia de esta letra con el desplazamiento comun
+            font.draw(p.charStrings[i], left + p.charX[i] * pose.scale + pose.dx * extra,
+                    top + pose.dy * extra, 0f, Align.left, false);
+        }
+
+        font.getData().setScale(1f);
+        font.setColor(Color.white);
+        font.setUseIntegerPositions(ints);
+    }
+
+    // Tarred: gotas de brea muy espaciadas (en sparks). Se forman, caen lento hasta un suelo
+    // ficticio bajo el texto y ahi se aplastan en un ovalo que se ensancha y se desvanece.
+    private void updateTar(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.sparks == null) p.sparks = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float remaining = p.lifetime - p.age;
+        boolean canSpawn = remaining >= TAR_LIFE_MIN * 0.5f;
+        int target = Mathf.clamp(Math.round(p.textWidth / (size * 1.1f)), 2, 5);
+
+        for (int i = p.sparks.size - 1; i >= 0; i--) {
+            Particle dp = p.sparks.get(i);
+            dp.age += dt;
+            if (dp.age < dp.life) continue;
+
+            if (canSpawn && i < target && liveParticles <= particleCap) {
+                spawnTarDrop(p, dp, i, target, remaining, TAR_DELAY_MAX);
+            } else {
+                p.sparks.remove(i);
+                liveParticles--;
+            }
+        }
+        while (canSpawn && p.sparks.size < target && liveParticles < particleCap) {
+            Particle dp = new Particle();
+            spawnTarDrop(p, dp, p.sparks.size, target, remaining, TAR_DELAY_MAX * 1.2f);
+            p.sparks.add(dp);
+            liveParticles++;
+        }
+
+        float yGround = cy + (-p.textHeight / 2f - TAR_GROUND * sizeFactor) * pose.scale;
+        for (int i = 0; i < p.sparks.size; i++) {
+            Particle dp = p.sparks.get(i);
+            if (dp.age < 0f) continue;
+
+            float t = Mathf.clamp(dp.age / dp.life, 0f, 1f);
+            float r0 = TAR_DROP_SIZE * size * dp.sizeMul * pose.scale;
+            float x = cx + dp.offX * pose.scale;
+            float yStart = cy + dp.offY * pose.scale;
+            float a = pose.alpha;
+
+            if (t < TAR_FORM) {
+                // Se forma colgando del texto
+                float k = t / TAR_FORM;
+                k = k * k * (3f - 2f * k);
+                drawTarDrop(x, yStart, r0 * k, 0.1f + 0.3f * k, a);
+            } else if (t < TAR_FORM + TAR_FALL) {
+                // Cae despacio (algo mas rapido al final) hasta el suelo
+                float f = (t - TAR_FORM) / TAR_FALL;
+                float y = yStart + (yGround - yStart) * (float) Math.pow(f, 1.5);
+                drawTarDrop(x, y, r0, 0.4f + 0.8f * f, a);
+            } else {
+                // Se aplasta contra el suelo: ovalo que se ensancha y se desvanece
+                float s = (t - TAR_FORM - TAR_FALL) / (1f - TAR_FORM - TAR_FALL);
+                float ease = 1f - (1f - s) * (1f - s);
+                float rx = r0 * (1f + TAR_SPLAT_GROW * ease);
+                float fade = 1f - Math.max(0f, (s - 0.4f) / 0.6f);
+                Draw.color(TEXT_TAR, a * fade);
+                fillEllipse(x, yGround, rx, rx * TAR_SPLAT_FLAT);
+            }
+        }
+        Draw.reset();
+    }
+
+    // Una gota de brea: circulo con colita hacia arriba y un brillo apagado.
+    private void drawTarDrop(float x, float y, float r, float stretch, float alpha) {
+        if (r < 0.05f) return;
+        Draw.color(TEXT_TAR, alpha);
+        Fill.circle(x, y, r);
+        Fill.tri(x - r * 0.8f, y + r * 0.3f, x + r * 0.8f, y + r * 0.3f, x, y + r * (1.4f + stretch));
+        Draw.color(Color.white, alpha * 0.25f);
+        Fill.circle(x - r * 0.3f, y + r * 0.25f, r * 0.25f);
+    }
+
+    // Ovalo relleno con el color actual (abanico de triangulos).
+    private void fillEllipse(float x, float y, float rx, float ry) {
+        for (int i = 0; i < TAR_SEG; i++) {
+            int j = (i + 1) % TAR_SEG;
+            Fill.tri(x, y, x + TAR_COS[i] * rx, y + TAR_SIN[i] * ry, x + TAR_COS[j] * rx, y + TAR_SIN[j] * ry);
+        }
+    }
+
+    // Coloca una gota de brea en la parte de abajo de las letras; nace tras una pausa larga al azar.
+    private void spawnTarDrop(Popup p, Particle dp, int slot, int slots, float remaining, float maxDelay) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f;
+        float slotW = halfW * 2f / n;
+
+        dp.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        dp.offY = -p.textHeight * 0.35f;
+        dp.sizeMul = Mathf.random(0.8f, 1.2f);
+        dp.phase = Mathf.random(Mathf.PI2);
+        dp.life = Math.max(Math.min(Mathf.random(TAR_LIFE_MIN, TAR_LIFE_MAX), remaining), 0.05f);
+        dp.age = -Mathf.random(maxDelay);
+    }
+
     // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
     private void ensureCharLayout(Popup p) {
         if (p.charStrings != null) return;
@@ -1785,6 +2172,7 @@ public class DamageNumbersMod extends Mod {
         int n = p.text.length();
         p.charStrings = new String[n];
         p.charX = new float[n];
+        p.charSpeed = new float[n];
         for (int i = 0; i < n; i++) {
             p.charStrings[i] = String.valueOf(p.text.charAt(i));
 
@@ -1793,6 +2181,11 @@ public class DamageNumbersMod extends Mod {
             float upToHere = layout.width;
             layout.setText(font, p.charStrings[i]);
             p.charX[i] = Math.max(upToHere - layout.width, 0f);
+
+            // Velocidad propia de la letra: ligeramente distinta, siempre la misma para este texto
+            float h = (float) Math.sin(p.fxSeed * 3.7f + i * 12.9898f) * 43758.5453f;
+            h -= (float) Math.floor(h);
+            p.charSpeed[i] = 1f + (h - 0.5f) * TAR_SPEED_VARIATION;
         }
 
         Pools.free(layout);
