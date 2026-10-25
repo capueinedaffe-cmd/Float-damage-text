@@ -184,7 +184,7 @@ public class DamageNumbersMod extends Mod {
     private static final float SNOW_SIZE = 0.38f;          // radio base
 
     // --- Corroded: texto y gases verde menta; glow en orbita y gotas que caen verde oliva ---
-    private static final Color TEXT_MINT = Color.valueOf("9bffcb");
+    private static final Color TEXT_MINT = Color.valueOf("D1FFDF");
     private static final Color GLOW_OLIVE = new Color(0.63f, 0.69f, 0.13f, 0.30f);
     private static final Color GLOW_OLIVE_SOFT = new Color(0.75f, 0.8f, 0.29f, 0.18f);
     private static final Color GAS_MINT = Color.valueOf("8cffc4");
