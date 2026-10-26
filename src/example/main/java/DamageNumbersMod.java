@@ -150,7 +150,8 @@ public class DamageNumbersMod extends Mod {
     private static final int PARTICLE_MAX_PER_TEXT = 24;   // tope de particulas simultaneas en un solo texto
 
     // Efectos criticos disponibles (uno por estado de la bala). Los demas llegan en proximas entregas.
-    private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2, FX_CORRODED = 3, FX_WET = 4, FX_TARRED = 5;
+    private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2, FX_CORRODED = 3, FX_WET = 4, FX_TARRED = 5,
+            FX_BURNING = 6, FX_SHOCKED = 7, FX_BLASTED = 8;
 
     // --- Freezing: cristales de hielo en tres fases pulsantes, texto celeste y nieve ---
     // Fase 1: tres cristales pequenos. Fase 2: crecen y aparece otro pequeno. Fase 3: el central crece mas.
@@ -212,7 +213,7 @@ public class DamageNumbersMod extends Mod {
     private static final Color WET_BUBBLE = Color.valueOf("7a96ea");      // un poco mas claro que el texto
     private static final Color WET_BUBBLE_DEEP = Color.valueOf("3552c4"); // azul del degradado de abajo a la derecha
     private static final float WET_BUBBLE_ALPHA = 0.5f;
-    private static final float WET_BUBBLE_MIN = 0.05f, WET_BUBBLE_MAX = 0.11f; // radio (fraccion del tamano de referencia)
+    private static final float WET_BUBBLE_MIN = 0.09f, WET_BUBBLE_MAX = 0.18f; // radio (fraccion del tamano de referencia)
     private static final float WET_WOBBLE = 0.22f;         // cuanto se mueven sin salirse de su punto (unidades, texto tamano 2.0)
     private static final float WET_APPEAR_SECONDS = 0.25f; // cada burbuja nace creciendo
     private static final float WET_APPEAR_MAX_DELAY = 0.35f;
@@ -241,6 +242,67 @@ public class DamageNumbersMod extends Mod {
     private static final float TAR_LIFE_MIN = 1.1f, TAR_LIFE_MAX = 1.5f; // ciclo de una gota: formarse, caer, aplastarse
     private static final float TAR_DELAY_MAX = 1.6f;       // pausa maxima antes de que salga otra gota (muy espaciadas)
     private static final float TAR_FORM = 0.15f, TAR_FALL = 0.60f; // fracciones del ciclo; el resto es el aplastado en el suelo
+    // --- Burning: texto con luz en el centro, luz pulsante detras, chispas que suben y humo que cambia de color ---
+    private static final Color TEXT_BURN = Color.valueOf("FEBD7B");
+    private static final Color BURN_CORE = Color.valueOf("FCF5C2");
+    private static final Color BURN_LIGHT = Color.valueOf("F7B185");
+    private static final Color SMOKE_1 = Color.valueOf("FEB07A");
+    private static final Color SMOKE_2 = Color.valueOf("F76F6E");
+    private static final Color SMOKE_3 = Color.valueOf("372222");
+    private static final float BURN_LIGHT_ALPHA = 0.22f;   // opacidad de la luz pulsante en su punto mas fuerte
+    private static final float BURN_LIGHT_SPEED = 3f;      // velocidad del pulso
+    private static final float BURN_SMOKE_LIFE_MIN = 0.9f, BURN_SMOKE_LIFE_MAX = 1.5f;
+    private static final float BURN_SMOKE_SIZE = 0.2f;     // radio final del humo (fraccion del tamano de referencia)
+    private static final float BURN_SMOKE_RISE = 5f;       // cuanto sube por su cuenta (unidades por segundo, texto tamano 2.0)
+    private static final float BURN_SMOKE_LEFT = 0.35f;    // fraccion de esa subida que se desvia a la izquierda
+    private static final float BURN_SMOKE_FAST = 0.3f;     // el humo recorre ese extra del desplazamiento del texto (va mas rapido que el)
+    private static final float BURN_SMOKE_ALPHA = 0.55f;
+    private static final float BURN_SPECK_LIFE_MIN = 0.5f, BURN_SPECK_LIFE_MAX = 0.9f; // lo que tarda una chispa en cruzar el texto
+    private static final float BURN_SPECK_SIZE = 0.045f;   // radio de la chispa (fraccion del tamano de referencia)
+    private static final float BURN_SPECK_ALPHA = 0.9f;
+
+    // --- Shocked: texto celeste con luz azul, arcos electricos finos y chispas ---
+    private static final Color TEXT_SHOCK = Color.valueOf("b7e8ff");
+    private static final Color GLOW_SHOCK = Color.valueOf("3a7bff");
+    private static final Color ARC_HALO = Color.valueOf("7fd4ff");
+    private static final float SHOCK_GLOW_RADIUS = 1.6f;   // hasta donde llega la luz azul (unidades, texto tamano 2.0)
+    private static final float SHOCK_GLOW_ALPHA = 0.2f;    // intensidad de la luz azul (no muy intensa)
+    private static final int SHOCK_GLOW_SAMPLES = 6;
+    private static final int ARC_POINTS = 7;               // puntos de cada arco (quiebres)
+    private static final float ARC_LIFE_MIN = 0.08f, ARC_LIFE_MAX = 0.2f; // un arco dura apenas un instante
+    private static final float ARC_DELAY_MAX = 0.25f;      // pausa maxima antes de que salga otro arco
+    private static final float ARC_LENGTH_MIN = 0.5f, ARC_LENGTH_MAX = 1.1f; // largo (fraccion del tamano de referencia)
+    private static final float ARC_JITTER = 0.18f;         // cuanto se quiebra el arco (fraccion de su largo)
+    private static final float ARC_THICK = 0.2f;           // grosor del nucleo blanco (unidades, texto tamano 2.0)
+    private static final float SHOCK_SPARK_LIFE_MIN = 0.2f, SHOCK_SPARK_LIFE_MAX = 0.45f;
+    private static final float SHOCK_SPARK_SPEED_MIN = 8f, SHOCK_SPARK_SPEED_MAX = 18f; // unidades por segundo (texto tamano 2.0)
+    private static final float SHOCK_SPARK_SIZE = 0.035f;  // radio de la chispa (fraccion del tamano de referencia)
+
+    // --- Blasted: explosion al empezar, onda expansiva amarilla, humo grande y craters al rojo vivo ---
+    private static final Color TEXT_BLAST = Color.valueOf("474747");
+    private static final Color BLAST_FIRE_CORE = Color.valueOf("fff1a8");
+    private static final Color BLAST_FIRE = Color.valueOf("ff8a2a");
+    private static final Color BLAST_WAVE = Color.valueOf("fff4b8");
+    private static final Color BLAST_SMOKE = Color.valueOf("5e5b59");
+    private static final Color CRATER_DARK = Color.valueOf("1c1412");
+    private static final Color CRATER_HOT = Color.valueOf("ff4a1a");
+    private static final Color CRATER_BRIGHT = Color.valueOf("ffb060");
+    private static final float BLAST_FIRE_SECONDS = 0.45f; // duracion de la bola de fuego
+    private static final float BLAST_WAVE_SECONDS = 0.6f;  // duracion de la onda expansiva
+    private static final float BLAST_SMOKE_LIFE_MIN = 0.45f, BLAST_SMOKE_LIFE_MAX = 0.75f; // vida muy corta
+    private static final float BLAST_SMOKE_SIZE = 0.45f;   // radio final del humo (fraccion del tamano de referencia)
+    private static final float BLAST_CRATER_DELAY = 0.18f; // los craters aparecen cuando la explosion ya esta pasando
+    private static final float BLAST_CRATER_FADE = 0.35f;
+    private static final float BLAST_CRATER_SIZE = 0.2f;   // radio del crater (fraccion del tamano de referencia)
+    private static final int RING_SEG = 28;                // lados con los que se dibuja un aro
+    private static final float[] RING_COS = new float[RING_SEG], RING_SIN = new float[RING_SEG];
+    static {
+        for (int i = 0; i < RING_SEG; i++) {
+            RING_COS[i] = (float) Math.cos(i * Math.PI * 2.0 / RING_SEG);
+            RING_SIN[i] = (float) Math.sin(i * Math.PI * 2.0 / RING_SEG);
+        }
+    }
+
     private static final float TAR_DROP_SIZE = 0.09f;      // radio de la gota (fraccion del tamano de referencia)
     private static final float TAR_GROUND = 4f;            // a cuanto queda el suelo ficticio, bajo el texto (unidades, texto tamano 2.0)
     private static final float TAR_SPLAT_GROW = 1.3f;      // cuanto se ensancha el ovalo al aplastarse (veces el radio)
@@ -328,6 +390,9 @@ public class DamageNumbersMod extends Mod {
         float[] charX;               // inicio de cada letra respecto al borde izquierdo, a escala 1
         float[] charSpeed;           // multiplicador de desplazamiento de cada letra (Tarred)
         float motionSpeed = 1f;      // 1 = normal; Tarred lo baja a la mitad
+        float critAge;               // segundos desde que empezo el efecto critico actual
+        boolean fxInit;              // el efecto ya hizo su arranque unico (Blasted)
+        Seq<Arc> arcs;               // arcos electricos (Shocked)
         final float fxSeed = Mathf.random(100f); // desfasa los movimientos de cada texto
 
         // Datos de fusion
@@ -342,6 +407,14 @@ public class DamageNumbersMod extends Mod {
         float age, life;             // edad negativa = aun no nace
         float sizeMul;               // variacion de tamano
         float phase;                 // desfase propio (color y parpadeo de los destellos)
+        float vx, vy;                // velocidad (chispas de Shocked)
+        float aux1, aux2;            // datos de apoyo (en el humo de Burning: desplazamiento del texto al nacer)
+    }
+    // Un arco electrico de Shocked: linea quebrada, con puntos relativos al centro del texto (a escala 1)
+    private static class Arc {
+        final float[] x = new float[ARC_POINTS], y = new float[ARC_POINTS];
+        float age, life;             // edad negativa = pausa antes de aparecer
+        boolean sparked;             // ya solto sus chispas
     }
     private final Seq<Popup> popups = new Seq<>();
 
@@ -533,6 +606,7 @@ public class DamageNumbersMod extends Mod {
                 Popup p = popups.get(i);
 
                 p.age += dt;
+                if (p.critEffect != FX_NONE) p.critAge += dt;
                 if (p.age >= p.lifetime) {
                     if (p.critEffect == FX_WET) detachWetBubbles(p);
                     releasePopup(p);
@@ -564,11 +638,17 @@ public class DamageNumbersMod extends Mod {
                     Draw.reset();
                 }
 
+                // Luz y humo de Burning van detras del texto
+                if (p.critEffect == FX_BURNING) drawBurningBack(p, dt, textCx, y, pose);
+
                 if (p.critEffect == FX_MELTING) drawMeltingText(p, textCx, y, pose.scale, pose.alpha);
                 else if (p.critEffect == FX_FREEZING) drawFrozenText(p, textCx, y, pose.scale, pose.alpha);
                 else if (p.critEffect == FX_CORRODED) drawCorrodedText(p, textCx, y, pose.scale, pose.alpha);
                 else if (p.critEffect == FX_WET) drawText(p, textCx, y, pose.scale, pose.alpha, TEXT_WET);
                 else if (p.critEffect == FX_TARRED) drawTarredText(p, textCx, y, pose);
+                else if (p.critEffect == FX_BURNING) drawBurningText(p, textCx, y, pose);
+                else if (p.critEffect == FX_SHOCKED) drawShockedText(p, textCx, y, pose.scale, pose.alpha);
+                else if (p.critEffect == FX_BLASTED) drawText(p, textCx, y, pose.scale, pose.alpha, TEXT_BLAST);
                 else drawText(p, textCx, y, pose.scale, pose.alpha);
 
                 // Los cristales de hielo van por delante del texto (al 50 % de opacidad)
@@ -1318,6 +1398,9 @@ public class DamageNumbersMod extends Mod {
         p.motionSpeed = effect == FX_TARRED ? TAR_MOTION_SPEED : 1f; // Tarred: todo va a la mitad
         if (p.critEffect != effect) {
             p.critEffect = effect;
+            p.critAge = 0f;
+            p.fxInit = false;
+            p.arcs = null;
             if (p.particles != null) {
                 liveParticles -= p.particles.size;
                 p.particles.clear();
@@ -1337,6 +1420,9 @@ public class DamageNumbersMod extends Mod {
         if (type.status == StatusEffects.corroded) return FX_CORRODED;
         if (type.status == StatusEffects.wet) return FX_WET;
         if (type.status == StatusEffects.tarred) return FX_TARRED;
+        if (type.status == StatusEffects.burning) return FX_BURNING;
+        if (type.status == StatusEffects.shocked) return FX_SHOCKED;
+        if (type.status == StatusEffects.blasted) return FX_BLASTED;
         return FX_NONE;
     }
 
@@ -1347,6 +1433,9 @@ public class DamageNumbersMod extends Mod {
         else if (p.critEffect == FX_CORRODED) updateCorrosion(p, dt, cx, cy, pose);
         else if (p.critEffect == FX_WET) updateWet(p, dt, cx, cy, pose);
         else if (p.critEffect == FX_TARRED) updateTar(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_BURNING) updateBurningFront(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_SHOCKED) updateShock(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_BLASTED) updateBlast(p, dt, cx, cy, pose);
     }
 
     // Melting: burbujas de lava en bucle y destellos de luz.
@@ -2156,6 +2245,521 @@ public class DamageNumbersMod extends Mod {
         dp.phase = Mathf.random(Mathf.PI2);
         dp.life = Math.max(Math.min(Mathf.random(TAR_LIFE_MIN, TAR_LIFE_MAX), remaining), 0.05f);
         dp.age = -Mathf.random(maxDelay);
+    }
+
+    // ---------------------------------------------------------------------
+    //  Ayudas de dibujo compartidas
+    // ---------------------------------------------------------------------
+
+    // Resplandor radial: elipse con el color opaco en el centro y transparente en el borde.
+    // Se usa con mezcla aditiva (Draw.blend(Blending.additive)).
+    private void radialGlow(float x, float y, float rx, float ry, Color color, float alphaCenter) {
+        if (alphaCenter <= 0.003f || rx < 0.05f || ry < 0.05f) return;
+        float c = Color.toFloatBits(color.r, color.g, color.b, alphaCenter);
+        float e = Color.toFloatBits(color.r, color.g, color.b, 0f);
+        for (int i = 0; i < TAR_SEG; i++) {
+            int j = (i + 1) % TAR_SEG;
+            Fill.quad(x, y, c,
+                    x + TAR_COS[i] * rx, y + TAR_SIN[i] * ry, e,
+                    x + TAR_COS[j] * rx, y + TAR_SIN[j] * ry, e,
+                    x, y, c);
+        }
+    }
+
+    // Aro elíptico con el color y el grosor actuales.
+    private void ringEllipse(float x, float y, float rx, float ry, float stroke) {
+        Lines.stroke(Math.max(stroke, 0.1f));
+        for (int i = 0; i < RING_SEG; i++) {
+            int j = (i + 1) % RING_SEG;
+            Lines.line(x + RING_COS[i] * rx, y + RING_SIN[i] * ry, x + RING_COS[j] * rx, y + RING_SIN[j] * ry);
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    //  Burning
+    // ---------------------------------------------------------------------
+
+    // Color del humo de Burning segun su edad t (0 a 1): FEB07A -> F76F6E -> 372222.
+    private void smokeColor(float t, Color out) {
+        if (t < 0.5f) out.set(SMOKE_1).lerp(SMOKE_2, t * 2f);
+        else out.set(SMOKE_2).lerp(SMOKE_3, (t - 0.5f) * 2f);
+    }
+
+    // Texto de Burning: dibujado letra por letra, de FEBD7B en los bordes a FCF5C2 en el centro
+    // (la "textura de luz" se concentra en el medio), con un refuerzo de luz que parpadea.
+    private void drawBurningText(Popup p, float cx, float cy, Pose pose) {
+        ensureCharLayout(p);
+        int n = p.charStrings.length;
+        if (n == 0) return;
+
+        Font font = Fonts.outline;
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * p.fontSize * pose.scale / Scl.scl(1f));
+
+        float halfW = Math.max(p.textWidth / 2f, 0.001f);
+        float left = cx - p.textWidth * pose.scale / 2f;
+        float top = cy + p.textHeight * pose.scale / 2f;
+
+        // Intensidad de la luz de cada letra: 1 en el centro del texto, 0 en los extremos
+        for (int pass = 0; pass < 2; pass++) {
+            if (pass == 1) Draw.blend(Blending.additive);
+
+            for (int i = 0; i < n; i++) {
+                float cell = (i + 1 < n ? p.charX[i + 1] : p.textWidth) - p.charX[i];
+                float mid = p.charX[i] + cell / 2f - halfW;
+                float k = 1f - Math.min(Math.abs(mid) / halfW, 1f);
+                k = k * k * (0.9f + 0.1f * Mathf.sin(fxTime * 6f + i * 1.7f + p.fxSeed));
+
+                if (pass == 0) {
+                    drawColor.set(TEXT_BURN).lerp(BURN_CORE, k);
+                    drawColor.a = pose.alpha;
+                } else {
+                    drawColor.set(BURN_CORE);
+                    drawColor.a = 0.45f * k * pose.alpha;
+                }
+                font.setColor(drawColor);
+                font.draw(p.charStrings[i], left + p.charX[i] * pose.scale, top, 0f, Align.left, false);
+            }
+
+            if (pass == 1) Draw.blend();
+        }
+
+        font.getData().setScale(1f);
+        font.setColor(Color.white);
+        font.setUseIntegerPositions(ints);
+    }
+
+    // Burning, por detras del texto: la luz pulsante de baja opacidad y el humo (en particles).
+    private void drawBurningBack(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.particles == null) p.particles = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float remaining = p.lifetime - p.age;
+        boolean canSpawn = remaining >= BURN_SMOKE_LIFE_MIN * 0.5f;
+
+        // Luz pulsante detras del texto
+        float pulse = 0.55f + 0.45f * Mathf.sin(fxTime * BURN_LIGHT_SPEED + p.fxSeed);
+        Draw.blend(Blending.additive);
+        radialGlow(cx, cy, (p.textWidth / 2f + size * 0.35f) * pose.scale, (p.textHeight / 2f + size * 0.45f) * pose.scale,
+                BURN_LIGHT, BURN_LIGHT_ALPHA * pulse * pose.alpha);
+        Draw.blend();
+
+        // Humo: nace en el texto, sube y cambia de color antes de desaparecer
+        int target = Mathf.clamp(Math.round(p.textWidth / (size * 0.35f)), 4, 14);
+        for (int i = p.particles.size - 1; i >= 0; i--) {
+            Particle pt = p.particles.get(i);
+            pt.age += dt;
+            if (pt.age < pt.life) continue;
+
+            if (canSpawn && i < target && liveParticles <= particleCap) {
+                spawnSmoke(p, pt, i, target, remaining, pose, 0.5f);
+            } else {
+                p.particles.remove(i);
+                liveParticles--;
+            }
+        }
+        while (canSpawn && p.particles.size < target && liveParticles < particleCap) {
+            Particle pt = new Particle();
+            spawnSmoke(p, pt, p.particles.size, target, remaining, pose, BURN_SMOKE_LIFE_MAX);
+            p.particles.add(pt);
+            liveParticles++;
+        }
+
+        for (int i = 0; i < p.particles.size; i++) {
+            Particle pt = p.particles.get(i);
+            if (pt.age < 0f) continue;
+
+            float t = Mathf.clamp(pt.age / pt.life, 0f, 1f);
+            float rise = pt.age * BURN_SMOKE_RISE * sizeFactor;
+            // Ademas de seguir al texto, recorre un extra de su desplazamiento: va un poco mas rapido que el
+            float x = cx + (pt.offX - rise * BURN_SMOKE_LEFT) * pose.scale + (pose.dx - pt.aux1) * BURN_SMOKE_FAST;
+            float y = cy + (pt.offY + rise) * pose.scale + (pose.dy - pt.aux2) * BURN_SMOKE_FAST;
+
+            float env = Math.min(t / 0.12f, 1f) * (1f - Math.max(0f, (t - 0.7f) / 0.3f)); // aparece rapido, se va al final
+            float a = BURN_SMOKE_ALPHA * env * pose.alpha;
+            if (a <= 0.01f) continue;
+
+            smokeColor(t, drawColor);
+            Draw.color(drawColor, a);
+            Fill.circle(x, y, BURN_SMOKE_SIZE * size * pt.sizeMul * (0.4f + 0.6f * t) * pose.scale);
+        }
+        Draw.reset();
+    }
+
+    // Coloca una voluta de humo de Burning en el texto; nace tras una pausa corta al azar.
+    private void spawnSmoke(Popup p, Particle pt, int slot, int slots, float remaining, Pose pose, float maxDelay) {
+        int n = Math.max(slots, 1);
+        float halfW = p.textWidth / 2f;
+        float halfH = p.textHeight / 2f;
+        float slotW = halfW * 2f / n;
+
+        pt.offX = -halfW + ((slot % n) + Mathf.random()) * slotW;
+        pt.offY = Mathf.random(-halfH * 0.8f, halfH * 0.2f);
+        pt.sizeMul = Mathf.random(0.7f, 1.3f);
+        pt.phase = Mathf.random(Mathf.PI2);
+        pt.aux1 = pose.dx;
+        pt.aux2 = pose.dy;
+        pt.life = Math.max(Math.min(Mathf.random(BURN_SMOKE_LIFE_MIN, BURN_SMOKE_LIFE_MAX), remaining), 0.05f);
+        pt.age = -Mathf.random(maxDelay);
+    }
+
+    // Burning, por delante del texto: chispas FCF5C2 que surgen de debajo y suben. Solo se ven
+    // mientras cruzan el texto (aparecen al entrar por abajo y se apagan al salir por arriba) y
+    // nacen sobre las letras.
+    private void updateBurningFront(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.sparks == null) p.sparks = new Seq<>();
+        ensureCharLayout(p);
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float remaining = p.lifetime - p.age;
+        boolean canSpawn = remaining >= BURN_SPECK_LIFE_MIN * 0.5f;
+        float halfH = p.textHeight / 2f;
+        int target = Mathf.clamp(Math.round(p.textWidth / (size * 0.3f)), 5, 18);
+
+        for (int i = p.sparks.size - 1; i >= 0; i--) {
+            Particle sp = p.sparks.get(i);
+            sp.age += dt;
+            if (sp.age < sp.life) continue;
+
+            if (canSpawn && i < target && liveParticles <= particleCap) {
+                spawnSpeck(p, sp, remaining, 0.3f);
+            } else {
+                p.sparks.remove(i);
+                liveParticles--;
+            }
+        }
+        while (canSpawn && p.sparks.size < target && liveParticles < particleCap) {
+            Particle sp = new Particle();
+            spawnSpeck(p, sp, remaining, BURN_SPECK_LIFE_MAX);
+            p.sparks.add(sp);
+            liveParticles++;
+        }
+
+        Draw.blend(Blending.additive);
+        float edge = Math.max(p.textHeight * 0.25f, 0.001f);
+        for (int i = 0; i < p.sparks.size; i++) {
+            Particle sp = p.sparks.get(i);
+            if (sp.age < 0f) continue;
+
+            float t = Mathf.clamp(sp.age / sp.life, 0f, 1f);
+            float yRel = -halfH - size * 0.1f + t * (p.textHeight + size * 0.2f); // de abajo del texto hasta arriba
+            float inside = Mathf.clamp((yRel + halfH) / edge, 0f, 1f) * Mathf.clamp((halfH - yRel) / edge, 0f, 1f);
+            float a = BURN_SPECK_ALPHA * inside * pose.alpha;
+            if (a <= 0.01f) continue;
+
+            float x = cx + (sp.offX + Mathf.sin(sp.age * 8f + sp.phase) * 0.25f * sizeFactor) * pose.scale;
+            float y = cy + yRel * pose.scale;
+            Draw.color(BURN_CORE, a);
+            Fill.circle(x, y, BURN_SPECK_SIZE * size * sp.sizeMul * pose.scale);
+        }
+        Draw.blend();
+        Draw.reset();
+    }
+
+    // Coloca una chispa de Burning dentro de una letra al azar, desde abajo del texto.
+    private void spawnSpeck(Popup p, Particle sp, float remaining, float maxDelay) {
+        int n = p.charStrings == null ? 0 : p.charStrings.length;
+        float halfW = p.textWidth / 2f;
+        if (n > 0) {
+            int i = Mathf.random(n - 1);
+            float cell = (i + 1 < n ? p.charX[i + 1] : p.textWidth) - p.charX[i];
+            sp.offX = -halfW + p.charX[i] + Mathf.random(0.15f, 0.85f) * cell;
+        } else {
+            sp.offX = Mathf.random(-halfW, halfW);
+        }
+        sp.sizeMul = Mathf.random(0.7f, 1.4f);
+        sp.phase = Mathf.random(Mathf.PI2);
+        sp.life = Math.max(Math.min(Mathf.random(BURN_SPECK_LIFE_MIN, BURN_SPECK_LIFE_MAX), remaining), 0.05f);
+        sp.age = -Mathf.random(maxDelay);
+    }
+
+    // ---------------------------------------------------------------------
+    //  Shocked
+    // ---------------------------------------------------------------------
+
+    // Texto de Shocked: celeste claro, con una luz azul suave alrededor que parpadea un poco.
+    private void drawShockedText(Popup p, float cx, float cy, float scale, float alpha) {
+        Font font = Fonts.outline;
+        boolean ints = font.usesIntegerPositions();
+        font.setUseIntegerPositions(false);
+        font.getData().setScale(0.25f * p.fontSize * scale / Scl.scl(1f));
+
+        float radius = SHOCK_GLOW_RADIUS * (p.fontSize / 2f) * scale;
+        float flicker = 0.8f + 0.2f * Mathf.sin(fxTime * 14f + p.fxSeed);
+        float top = cy + p.textHeight * scale / 2f;
+
+        Draw.blend(Blending.additive);
+        for (int i = 0; i < SHOCK_GLOW_SAMPLES; i++) {
+            float ang = i * Mathf.PI2 / SHOCK_GLOW_SAMPLES;
+            drawColor.set(GLOW_SHOCK);
+            drawColor.a = SHOCK_GLOW_ALPHA * flicker * alpha;
+            font.setColor(drawColor);
+            font.draw(p.text, cx + Mathf.cos(ang) * radius, top + Mathf.sin(ang) * radius * 0.8f, 0f, Align.center, false);
+        }
+        Draw.blend();
+
+        font.getData().setScale(1f);
+        font.setColor(Color.white);
+        font.setUseIntegerPositions(ints);
+
+        drawText(p, cx, cy, scale, alpha, TEXT_SHOCK);
+    }
+
+    // Shocked, por delante del texto: arcos electricos finos (en arcs) y las chispas que sueltan (en sparks).
+    private void updateShock(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.arcs == null) p.arcs = new Seq<>();
+        if (p.sparks == null) p.sparks = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        int arcTarget = Mathf.clamp(Math.round(p.textWidth / (size * 0.5f)), 2, 7);
+
+        while (p.arcs.size < arcTarget) {
+            Arc a = new Arc();
+            resetArc(p, a, size, ARC_DELAY_MAX * 2f);
+            p.arcs.add(a);
+        }
+        for (int i = 0; i < p.arcs.size; i++) {
+            Arc a = p.arcs.get(i);
+            a.age += dt;
+            if (a.age >= a.life) resetArc(p, a, size, ARC_DELAY_MAX); // otro arco, en otro lugar
+            if (a.age >= 0f && !a.sparked) {
+                a.sparked = true;
+                emitShockSparks(p, a, sizeFactor);
+            }
+        }
+
+        // Chispas: avanzan frenando y desaparecen
+        for (int i = p.sparks.size - 1; i >= 0; i--) {
+            Particle sp = p.sparks.get(i);
+            sp.age += dt;
+            if (sp.age >= sp.life) {
+                p.sparks.remove(i);
+                liveParticles--;
+            }
+        }
+
+        float thick = ARC_THICK * sizeFactor * pose.scale;
+
+        // Arcos: primero el halo celeste (suma luz), despues el nucleo blanco muy fino
+        for (int pass = 0; pass < 2; pass++) {
+            if (pass == 0) Draw.blend(Blending.additive);
+            for (int i = 0; i < p.arcs.size; i++) {
+                Arc a = p.arcs.get(i);
+                if (a.age < 0f) continue;
+
+                float t = Mathf.clamp(a.age / a.life, 0f, 1f);
+                float f = 1f - Math.abs(2f * t - 1f); // se enciende y se apaga en un instante
+                if (pass == 0) {
+                    Draw.color(ARC_HALO, 0.5f * f * pose.alpha);
+                    Lines.stroke(Math.max(thick * 4f, 0.2f));
+                } else {
+                    Draw.color(Color.white, f * pose.alpha);
+                    Lines.stroke(Math.max(thick, 0.1f));
+                }
+                for (int k = 0; k < ARC_POINTS - 1; k++) {
+                    Lines.line(cx + a.x[k] * pose.scale, cy + a.y[k] * pose.scale,
+                            cx + a.x[k + 1] * pose.scale, cy + a.y[k + 1] * pose.scale);
+                }
+            }
+            if (pass == 0) Draw.blend();
+        }
+
+        // Chispas: puntos circulares blancos
+        for (int i = 0; i < p.sparks.size; i++) {
+            Particle sp = p.sparks.get(i);
+            float t = Mathf.clamp(sp.age / sp.life, 0f, 1f);
+            float travel = sp.age * (1f - 0.4f * t); // frenan un poco
+            float x = cx + (sp.offX + sp.vx * travel) * pose.scale;
+            float y = cy + (sp.offY + sp.vy * travel) * pose.scale;
+            Draw.color(Color.white, (1f - t) * pose.alpha);
+            Fill.circle(x, y, SHOCK_SPARK_SIZE * size * sp.sizeMul * pose.scale);
+        }
+
+        Lines.stroke(1f);
+        Draw.reset();
+    }
+
+    // Da forma nueva a un arco: nace cerca del borde del texto y se quiebra hacia afuera o de costado.
+    private void resetArc(Popup p, Arc a, float size, float maxDelay) {
+        float halfW = p.textWidth / 2f + size * 0.12f;
+        float halfH = p.textHeight / 2f + size * 0.12f;
+
+        float theta = Mathf.random(Mathf.PI2);
+        float sx = Mathf.cos(theta) * halfW;
+        float sy = Mathf.sin(theta) * halfH;
+        float dir = theta + Mathf.random(-1f, 1f);
+        float len = Mathf.random(ARC_LENGTH_MIN, ARC_LENGTH_MAX) * size;
+        float ex = sx + Mathf.cos(dir) * len;
+        float ey = sy + Mathf.sin(dir) * len;
+
+        float nx = -(ey - sy) / len, ny = (ex - sx) / len; // perpendicular al arco
+        for (int i = 0; i < ARC_POINTS; i++) {
+            float t = i / (float) (ARC_POINTS - 1);
+            float jitter = Mathf.random(-1f, 1f) * len * ARC_JITTER * Mathf.sin(t * Mathf.PI); // sin quiebre en las puntas
+            a.x[i] = sx + (ex - sx) * t + nx * jitter;
+            a.y[i] = sy + (ey - sy) * t + ny * jitter;
+        }
+
+        a.life = Mathf.random(ARC_LIFE_MIN, ARC_LIFE_MAX);
+        a.age = -Mathf.random(maxDelay);
+        a.sparked = false;
+    }
+
+    // Un arco suelta de 2 a 4 chispas desde sus puntas o su camino.
+    private void emitShockSparks(Popup p, Arc a, float sizeFactor) {
+        int count = Mathf.random(2, 4);
+        for (int i = 0; i < count; i++) {
+            if (liveParticles >= particleCap) return;
+
+            int k = Mathf.chance(0.6) ? (Mathf.chance(0.5) ? 0 : ARC_POINTS - 1) : Mathf.random(ARC_POINTS - 1);
+            Particle sp = new Particle();
+            sp.offX = a.x[k];
+            sp.offY = a.y[k];
+            float ang = Mathf.random(Mathf.PI2);
+            float speed = Mathf.random(SHOCK_SPARK_SPEED_MIN, SHOCK_SPARK_SPEED_MAX) * sizeFactor;
+            sp.vx = Mathf.cos(ang) * speed;
+            sp.vy = Mathf.sin(ang) * speed;
+            sp.sizeMul = Mathf.random(0.7f, 1.3f);
+            sp.life = Mathf.random(SHOCK_SPARK_LIFE_MIN, SHOCK_SPARK_LIFE_MAX);
+            sp.age = 0f;
+            p.sparks.add(sp);
+            liveParticles++;
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    //  Blasted
+    // ---------------------------------------------------------------------
+
+    // Blasted, por delante del texto: al empezar, explosion (bola de fuego, onda expansiva amarilla
+    // y humo grande que lo tapa) y despues craters al rojo vivo sobre las letras.
+    // Los craters van en sparks y el humo en particles. Arranca una sola vez por efecto (fxInit).
+    private void updateBlast(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.particles == null) p.particles = new Seq<>();
+        if (p.sparks == null) p.sparks = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float halfW = p.textWidth / 2f;
+        float halfH = p.textHeight / 2f;
+
+        if (!p.fxInit) {
+            p.fxInit = true;
+
+            int puffs = Mathf.clamp(Math.round(p.textWidth / (size * 0.45f)), 5, 14);
+            for (int i = 0; i < puffs && liveParticles < particleCap; i++) {
+                Particle pt = new Particle();
+                float slotW = halfW * 2f / puffs;
+                pt.offX = -halfW + (i + Mathf.random()) * slotW;
+                pt.offY = Mathf.random(-halfH, halfH);
+                pt.sizeMul = Mathf.random(0.75f, 1.25f);
+                pt.phase = Mathf.random(Mathf.PI2);
+                pt.life = Mathf.random(BLAST_SMOKE_LIFE_MIN, BLAST_SMOKE_LIFE_MAX);
+                pt.age = -Mathf.random(0.08f);
+                p.particles.add(pt);
+                liveParticles++;
+            }
+
+            int craters = Mathf.clamp(Math.round(p.textWidth / (size * 0.7f)), 2, 6);
+            for (int i = 0; i < craters && liveParticles < particleCap; i++) {
+                Particle cr = new Particle();
+                float slotW = halfW * 2f / craters;
+                cr.offX = -halfW + (i + Mathf.random(0.2f, 0.8f)) * slotW;
+                cr.offY = Mathf.random(-halfH * 0.25f, halfH * 0.25f);
+                cr.sizeMul = Mathf.random(0.75f, 1.25f);
+                cr.phase = Mathf.random(Mathf.PI2);
+                cr.life = Float.MAX_VALUE;
+                p.sparks.add(cr);
+                liveParticles++;
+            }
+        }
+
+        float ca = p.critAge;
+
+        // 1) Craters al rojo vivo: aparecen cuando la explosion ya esta pasando
+        float craterK = Mathf.clamp((ca - BLAST_CRATER_DELAY) / BLAST_CRATER_FADE, 0f, 1f) * pose.alpha;
+        if (craterK > 0.01f) {
+            for (int i = 0; i < p.sparks.size; i++) {
+                Particle cr = p.sparks.get(i);
+                float x = cx + cr.offX * pose.scale;
+                float y = cy + cr.offY * pose.scale;
+                float r = BLAST_CRATER_SIZE * size * cr.sizeMul * pose.scale;
+                float flicker = 0.8f + 0.2f * Mathf.sin(fxTime * 3f + cr.phase);
+
+                // Borde oscuro del hueco
+                Draw.color(CRATER_DARK, 0.65f * craterK);
+                fillEllipse(x, y, r * 1.2f, r * 0.85f);
+
+                Draw.blend(Blending.additive);
+                radialGlow(x, y, r, r * 0.7f, CRATER_HOT, 0.85f * flicker * craterK);       // brasa
+                radialGlow(x, y, r * 0.5f, r * 0.35f, CRATER_BRIGHT, 0.7f * flicker * craterK); // centro al rojo blanco
+                // Grietas al rojo vivo que salen del crater
+                Draw.color(CRATER_HOT, 0.8f * craterK);
+                Lines.stroke(Math.max(r * 0.07f, 0.1f));
+                for (int k = 0; k < 4; k++) {
+                    float ang = cr.phase + k * Mathf.PI / 2f + Mathf.sin(cr.phase * 3f + k) * 0.4f;
+                    Lines.line(x + Mathf.cos(ang) * r * 0.9f, y + Mathf.sin(ang) * r * 0.65f,
+                            x + Mathf.cos(ang) * r * 1.7f, y + Mathf.sin(ang) * r * 1.2f);
+                }
+                Draw.blend();
+            }
+        }
+
+        // 2) Bola de fuego sobre todo el texto
+        if (ca < BLAST_FIRE_SECONDS) {
+            float t = ca / BLAST_FIRE_SECONDS;
+            float grow = 0.35f + 0.65f * (1f - (1f - t) * (1f - t));
+            float fade = (float) Math.pow(1f - t, 1.2) * pose.alpha;
+            float rx = (halfW + size * 0.35f) * pose.scale * grow;
+            float ry = (halfH + size * 0.5f) * pose.scale * grow;
+
+            Draw.blend(Blending.additive);
+            radialGlow(cx, cy, rx * 1.25f, ry * 1.25f, BLAST_FIRE, 0.6f * fade);
+            radialGlow(cx, cy, rx, ry, BLAST_FIRE_CORE, 0.95f * fade);
+            Draw.blend();
+        }
+
+        // 3) Onda expansiva amarillo claro que se aleja del texto
+        if (ca < BLAST_WAVE_SECONDS) {
+            float t = ca / BLAST_WAVE_SECONDS;
+            float g = 0.25f + 1.0f * (1f - (1f - t) * (1f - t));
+            float fade = (float) Math.pow(1f - t, 1.3) * pose.alpha;
+
+            Draw.blend(Blending.additive);
+            Draw.color(BLAST_WAVE, 0.9f * fade);
+            ringEllipse(cx, cy, (halfW + size * 0.8f) * pose.scale * g, (halfH + size * 0.8f) * pose.scale * g * 0.85f,
+                    size * 0.12f * (1f - t) * pose.scale);
+            Draw.blend();
+        }
+
+        // 4) Humo grande que tapa el texto y se disipa enseguida
+        for (int i = p.particles.size - 1; i >= 0; i--) {
+            Particle pt = p.particles.get(i);
+            pt.age += dt;
+            if (pt.age >= pt.life) {
+                p.particles.remove(i);
+                liveParticles--;
+                continue;
+            }
+            if (pt.age < 0f) continue;
+
+            float t = pt.age / pt.life;
+            float grow = 0.4f + 0.6f * (1f - (1f - t) * (1f - t));
+            float x = cx + pt.offX * pose.scale + Mathf.sin(pt.age * 3f + pt.phase) * 0.3f * sizeFactor;
+            float y = cy + (pt.offY + pt.age * 2f * sizeFactor) * pose.scale;
+            float a = 0.8f * (1f - t) * pose.alpha;
+            if (a <= 0.01f) continue;
+
+            Draw.color(BLAST_SMOKE, a);
+            Fill.circle(x, y, BLAST_SMOKE_SIZE * size * pt.sizeMul * grow * pose.scale);
+        }
+
+        Lines.stroke(1f);
+        Draw.reset();
     }
 
     // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
