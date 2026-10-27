@@ -2807,15 +2807,20 @@ public class DamageNumbersMod extends Mod {
             return;
         }
 
-        blastOriginX = cx - p.textWidth * scale / 2f;
-        blastOriginY = cy - p.textHeight * scale / 2f;
-        blastTile = Math.max(p.textHeight * scale * BLAST_TEXTURE_TILE, 0.001f);
-        blastOffX = (p.fxSeed * 0.137f) % 1f;
-        blastOffY = (p.fxSeed * 0.291f) % 1f;
+        // El dibujo esta ordenado por capas (sorting) y ahi no se pueden cambiar shaders:
+        // todo el cambio de shader va dentro de Draw.draw(z, Runnable), que se ejecuta en su turno de la capa.
+        // Los valores del shader se fijan dentro, porque el bloque corre mas tarde en el mismo cuadro.
+        Draw.draw(Draw.z(), () -> {
+            blastOriginX = cx - p.textWidth * scale / 2f;
+            blastOriginY = cy - p.textHeight * scale / 2f;
+            blastTile = Math.max(p.textHeight * scale * BLAST_TEXTURE_TILE, 0.001f);
+            blastOffX = (p.fxSeed * 0.137f) % 1f;
+            blastOffY = (p.fxSeed * 0.291f) % 1f;
 
-        Draw.shader(blastShader);
-        drawText(p, cx, cy, scale, alpha, Color.white);
-        Draw.shader(); // al volver al shader normal se dibuja lo pendiente con los valores de arriba
+            Draw.shader(blastShader);
+            drawText(p, cx, cy, scale, alpha, Color.white);
+            Draw.shader(); // al volver al shader normal se dibuja lo pendiente con los valores de arriba
+        });
     }
 
     // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
