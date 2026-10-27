@@ -2740,11 +2740,7 @@ public class DamageNumbersMod extends Mod {
           + "}\n";
 
     private static final String BLAST_FRAG =
-            "#ifdef GL_ES\n"
-          + "precision mediump float;\n"
-          + "precision mediump int;\n"
-          + "#endif\n"
-          + "uniform sampler2D u_texture;\n"
+            "uniform sampler2D u_texture;\n"
           + "uniform sampler2D u_tex;\n"
           + "uniform vec4 u_uv;\n"
           + "uniform vec2 u_off;\n"
