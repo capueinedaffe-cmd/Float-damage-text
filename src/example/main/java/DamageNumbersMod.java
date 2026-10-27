@@ -5,12 +5,14 @@ import arc.Events;
 import arc.func.Cons;
 import arc.graphics.Blending;
 import arc.graphics.Color;
+import arc.graphics.Gl;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Fill;
 import arc.graphics.g2d.Font;
 import arc.graphics.g2d.GlyphLayout;
 import arc.graphics.g2d.Lines;
 import arc.graphics.g2d.TextureRegion;
+import arc.graphics.gl.Shader;
 import arc.math.Mathf;
 import arc.math.geom.Rect;
 import arc.scene.style.Drawable;
@@ -249,7 +251,7 @@ public class DamageNumbersMod extends Mod {
     private static final Color SMOKE_1 = Color.valueOf("FEB07A");
     private static final Color SMOKE_2 = Color.valueOf("F76F6E");
     private static final Color SMOKE_3 = Color.valueOf("372222");
-    private static final float BURN_LIGHT_ALPHA = 0.22f;   // opacidad de la luz pulsante en su punto mas fuerte
+    private static final float BURN_LIGHT_ALPHA = 0.38f;   // opacidad de la luz pulsante en su punto mas fuerte
     private static final float BURN_LIGHT_SPEED = 3f;      // velocidad del pulso
     private static final float BURN_SMOKE_LIFE_MIN = 0.9f, BURN_SMOKE_LIFE_MAX = 1.5f;
     private static final float BURN_SMOKE_SIZE = 0.2f;     // radio final del humo (fraccion del tamano de referencia)
@@ -266,7 +268,7 @@ public class DamageNumbersMod extends Mod {
     private static final Color GLOW_SHOCK = Color.valueOf("3a7bff");
     private static final Color ARC_HALO = Color.valueOf("7fd4ff");
     private static final float SHOCK_GLOW_RADIUS = 1.6f;   // hasta donde llega la luz azul (unidades, texto tamano 2.0)
-    private static final float SHOCK_GLOW_ALPHA = 0.2f;    // intensidad de la luz azul (no muy intensa)
+    private static final float SHOCK_GLOW_ALPHA = 0.32f;   // intensidad de la luz azul (no muy intensa)
     private static final int SHOCK_GLOW_SAMPLES = 6;
     private static final int ARC_POINTS = 7;               // puntos de cada arco (quiebres)
     private static final float ARC_LIFE_MIN = 0.08f, ARC_LIFE_MAX = 0.2f; // un arco dura apenas un instante
@@ -278,22 +280,18 @@ public class DamageNumbersMod extends Mod {
     private static final float SHOCK_SPARK_SPEED_MIN = 8f, SHOCK_SPARK_SPEED_MAX = 18f; // unidades por segundo (texto tamano 2.0)
     private static final float SHOCK_SPARK_SIZE = 0.035f;  // radio de la chispa (fraccion del tamano de referencia)
 
-    // --- Blasted: explosion al empezar, onda expansiva amarilla, humo grande y craters al rojo vivo ---
+    // --- Blasted: explosion al empezar, onda expansiva amarilla, humo grande y letras con textura de lava ---
     private static final Color TEXT_BLAST = Color.valueOf("474747");
     private static final Color BLAST_FIRE_CORE = Color.valueOf("fff1a8");
     private static final Color BLAST_FIRE = Color.valueOf("ff8a2a");
     private static final Color BLAST_WAVE = Color.valueOf("fff4b8");
     private static final Color BLAST_SMOKE = Color.valueOf("5e5b59");
-    private static final Color CRATER_DARK = Color.valueOf("1c1412");
-    private static final Color CRATER_HOT = Color.valueOf("ff4a1a");
-    private static final Color CRATER_BRIGHT = Color.valueOf("ffb060");
     private static final float BLAST_FIRE_SECONDS = 0.45f; // duracion de la bola de fuego
     private static final float BLAST_WAVE_SECONDS = 0.6f;  // duracion de la onda expansiva
     private static final float BLAST_SMOKE_LIFE_MIN = 0.45f, BLAST_SMOKE_LIFE_MAX = 0.75f; // vida muy corta
     private static final float BLAST_SMOKE_SIZE = 0.45f;   // radio final del humo (fraccion del tamano de referencia)
-    private static final float BLAST_CRATER_DELAY = 0.18f; // los craters aparecen cuando la explosion ya esta pasando
-    private static final float BLAST_CRATER_FADE = 0.35f;
-    private static final float BLAST_CRATER_SIZE = 0.2f;   // radio del crater (fraccion del tamano de referencia)
+    private static final String BLAST_TEXTURE_SPRITE = "blasted-texture"; // assets/sprites/blasted-texture.png
+    private static final float BLAST_TEXTURE_TILE = 1.0f;  // lado de un cuadro de la textura = alto del texto x este valor
     private static final int RING_SEG = 28;                // lados con los que se dibuja un aro
     private static final float[] RING_COS = new float[RING_SEG], RING_SIN = new float[RING_SEG];
     static {
@@ -648,7 +646,7 @@ public class DamageNumbersMod extends Mod {
                 else if (p.critEffect == FX_TARRED) drawTarredText(p, textCx, y, pose);
                 else if (p.critEffect == FX_BURNING) drawBurningText(p, textCx, y, pose);
                 else if (p.critEffect == FX_SHOCKED) drawShockedText(p, textCx, y, pose.scale, pose.alpha);
-                else if (p.critEffect == FX_BLASTED) drawText(p, textCx, y, pose.scale, pose.alpha, TEXT_BLAST);
+                else if (p.critEffect == FX_BLASTED) drawBlastedText(p, textCx, y, pose.scale, pose.alpha);
                 else drawText(p, textCx, y, pose.scale, pose.alpha);
 
                 // Los cristales de hielo van por delante del texto (al 50 % de opacidad)
@@ -2636,11 +2634,10 @@ public class DamageNumbersMod extends Mod {
     // ---------------------------------------------------------------------
 
     // Blasted, por delante del texto: al empezar, explosion (bola de fuego, onda expansiva amarilla
-    // y humo grande que lo tapa) y despues craters al rojo vivo sobre las letras.
-    // Los craters van en sparks y el humo en particles. Arranca una sola vez por efecto (fxInit).
+    // y humo grande que lo tapa). El humo va en particles. Arranca una sola vez por efecto (fxInit).
+    // La textura de lava de las letras se dibuja aparte, en drawBlastedText.
     private void updateBlast(Popup p, float dt, float cx, float cy, Pose pose) {
         if (p.particles == null) p.particles = new Seq<>();
-        if (p.sparks == null) p.sparks = new Seq<>();
 
         float sizeFactor = p.fontSize / 2f * particleSizeMul;
         float size = PARTICLE_BASE_SIZE * sizeFactor;
@@ -2663,53 +2660,11 @@ public class DamageNumbersMod extends Mod {
                 p.particles.add(pt);
                 liveParticles++;
             }
-
-            int craters = Mathf.clamp(Math.round(p.textWidth / (size * 0.7f)), 2, 6);
-            for (int i = 0; i < craters && liveParticles < particleCap; i++) {
-                Particle cr = new Particle();
-                float slotW = halfW * 2f / craters;
-                cr.offX = -halfW + (i + Mathf.random(0.2f, 0.8f)) * slotW;
-                cr.offY = Mathf.random(-halfH * 0.25f, halfH * 0.25f);
-                cr.sizeMul = Mathf.random(0.75f, 1.25f);
-                cr.phase = Mathf.random(Mathf.PI2);
-                cr.life = Float.MAX_VALUE;
-                p.sparks.add(cr);
-                liveParticles++;
-            }
         }
 
         float ca = p.critAge;
 
-        // 1) Craters al rojo vivo: aparecen cuando la explosion ya esta pasando
-        float craterK = Mathf.clamp((ca - BLAST_CRATER_DELAY) / BLAST_CRATER_FADE, 0f, 1f) * pose.alpha;
-        if (craterK > 0.01f) {
-            for (int i = 0; i < p.sparks.size; i++) {
-                Particle cr = p.sparks.get(i);
-                float x = cx + cr.offX * pose.scale;
-                float y = cy + cr.offY * pose.scale;
-                float r = BLAST_CRATER_SIZE * size * cr.sizeMul * pose.scale;
-                float flicker = 0.8f + 0.2f * Mathf.sin(fxTime * 3f + cr.phase);
-
-                // Borde oscuro del hueco
-                Draw.color(CRATER_DARK, 0.65f * craterK);
-                fillEllipse(x, y, r * 1.2f, r * 0.85f);
-
-                Draw.blend(Blending.additive);
-                radialGlow(x, y, r, r * 0.7f, CRATER_HOT, 0.85f * flicker * craterK);       // brasa
-                radialGlow(x, y, r * 0.5f, r * 0.35f, CRATER_BRIGHT, 0.7f * flicker * craterK); // centro al rojo blanco
-                // Grietas al rojo vivo que salen del crater
-                Draw.color(CRATER_HOT, 0.8f * craterK);
-                Lines.stroke(Math.max(r * 0.07f, 0.1f));
-                for (int k = 0; k < 4; k++) {
-                    float ang = cr.phase + k * Mathf.PI / 2f + Mathf.sin(cr.phase * 3f + k) * 0.4f;
-                    Lines.line(x + Mathf.cos(ang) * r * 0.9f, y + Mathf.sin(ang) * r * 0.65f,
-                            x + Mathf.cos(ang) * r * 1.7f, y + Mathf.sin(ang) * r * 1.2f);
-                }
-                Draw.blend();
-            }
-        }
-
-        // 2) Bola de fuego sobre todo el texto
+        // 1) Bola de fuego sobre todo el texto
         if (ca < BLAST_FIRE_SECONDS) {
             float t = ca / BLAST_FIRE_SECONDS;
             float grow = 0.35f + 0.65f * (1f - (1f - t) * (1f - t));
@@ -2723,7 +2678,7 @@ public class DamageNumbersMod extends Mod {
             Draw.blend();
         }
 
-        // 3) Onda expansiva amarillo claro que se aleja del texto
+        // 2) Onda expansiva amarillo claro que se aleja del texto
         if (ca < BLAST_WAVE_SECONDS) {
             float t = ca / BLAST_WAVE_SECONDS;
             float g = 0.25f + 1.0f * (1f - (1f - t) * (1f - t));
@@ -2736,7 +2691,7 @@ public class DamageNumbersMod extends Mod {
             Draw.blend();
         }
 
-        // 4) Humo grande que tapa el texto y se disipa enseguida
+        // 3) Humo grande que tapa el texto y se disipa enseguida
         for (int i = p.particles.size - 1; i >= 0; i--) {
             Particle pt = p.particles.get(i);
             pt.age += dt;
@@ -2760,6 +2715,111 @@ public class DamageNumbersMod extends Mod {
 
         Lines.stroke(1f);
         Draw.reset();
+    }
+
+    // Texto de Blasted: la textura de lava (assets/sprites/blasted-texture.png) se recorta con la
+    // forma de las letras. Un shader toma el relleno de cada letra de la fuente y lo pinta con la
+    // textura; el contorno oscuro de la fuente se queda como esta. La textura se repite y escala
+    // con el alto del texto, y cada texto la desplaza distinto para que no sean todos iguales.
+    // Si el shader o el sprite no estan disponibles, se dibuja el texto gris de siempre.
+    private static final String BLAST_VERT =
+            "attribute vec4 a_position;\n"
+          + "attribute vec4 a_color;\n"
+          + "attribute vec2 a_texCoord0;\n"
+          + "uniform mat4 u_projTrans;\n"
+          + "uniform vec2 u_origin;\n"
+          + "varying vec4 v_color;\n"
+          + "varying vec2 v_texCoords;\n"
+          + "varying vec2 v_rel;\n"
+          + "void main(){\n"
+          + "    v_color = a_color;\n"
+          + "    v_color.a = v_color.a * (255.0/254.0);\n"
+          + "    v_texCoords = a_texCoord0;\n"
+          + "    v_rel = a_position.xy - u_origin;\n"
+          + "    gl_Position = u_projTrans * a_position;\n"
+          + "}\n";
+
+    private static final String BLAST_FRAG =
+            "#ifdef GL_ES\n"
+          + "precision mediump float;\n"
+          + "precision mediump int;\n"
+          + "#endif\n"
+          + "uniform sampler2D u_texture;\n"
+          + "uniform sampler2D u_tex;\n"
+          + "uniform vec4 u_uv;\n"
+          + "uniform vec2 u_off;\n"
+          + "uniform float u_tile;\n"
+          + "varying vec4 v_color;\n"
+          + "varying vec2 v_texCoords;\n"
+          + "varying vec2 v_rel;\n"
+          + "void main(){\n"
+          + "    vec4 g = texture2D(u_texture, v_texCoords);\n"
+          + "    vec2 st = fract(v_rel / u_tile + u_off);\n"
+          + "    st = st * 0.98 + 0.01;\n"
+          + "    vec2 uv = vec2(mix(u_uv.x, u_uv.z, st.x), mix(u_uv.w, u_uv.y, st.y));\n"
+          + "    vec4 t = texture2D(u_tex, uv);\n"
+          + "    float fill = smoothstep(0.45, 0.85, g.r);\n"
+          + "    vec3 col = mix(g.rgb * v_color.rgb, t.rgb, fill);\n"
+          + "    gl_FragColor = vec4(col, g.a * v_color.a);\n"
+          + "}\n";
+
+    private Shader blastShader;
+    private TextureRegion blastRegion;
+    private boolean blastShaderFailed;
+    private float blastOriginX, blastOriginY, blastTile = 1f, blastOffX, blastOffY;
+
+    private boolean ensureBlastShader() {
+        if (blastShader != null && blastRegion != null) return true;
+        if (blastShaderFailed) return false;
+
+        blastRegion = getCustomSprite(BLAST_TEXTURE_SPRITE);
+        if (blastRegion == null) {
+            blastShaderFailed = true; // getCustomSprite ya aviso en el log (una sola vez)
+            return false;
+        }
+
+        try {
+            Shader sh = new Shader(BLAST_VERT, BLAST_FRAG) {
+                @Override
+                public void apply() {
+                    setUniformf("u_origin", blastOriginX, blastOriginY);
+                    setUniformf("u_tile", blastTile);
+                    setUniformf("u_off", blastOffX, blastOffY);
+                    setUniformf("u_uv", blastRegion.u, blastRegion.v, blastRegion.u2, blastRegion.v2);
+                    blastRegion.texture.bind(1);
+                    setUniformi("u_tex", 1);
+                    Gl.activeTexture(Gl.texture0);
+                }
+            };
+            if (!sh.isCompiled()) {
+                Log.err("[Damage Numbers] El shader de Blasted no compilo: " + sh.getLog());
+                blastShaderFailed = true;
+                return false;
+            }
+            blastShader = sh;
+            return true;
+        } catch (Throwable t) {
+            Log.err("[Damage Numbers] No se pudo crear el shader de Blasted: " + t);
+            blastShaderFailed = true;
+            return false;
+        }
+    }
+
+    private void drawBlastedText(Popup p, float cx, float cy, float scale, float alpha) {
+        if (!ensureBlastShader()) {
+            drawText(p, cx, cy, scale, alpha, TEXT_BLAST);
+            return;
+        }
+
+        blastOriginX = cx - p.textWidth * scale / 2f;
+        blastOriginY = cy - p.textHeight * scale / 2f;
+        blastTile = Math.max(p.textHeight * scale * BLAST_TEXTURE_TILE, 0.001f);
+        blastOffX = (p.fxSeed * 0.137f) % 1f;
+        blastOffY = (p.fxSeed * 0.291f) % 1f;
+
+        Draw.shader(blastShader);
+        drawText(p, cx, cy, scale, alpha, Color.white);
+        Draw.shader(); // al volver al shader normal se dibuja lo pendiente con los valores de arriba
     }
 
     // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
