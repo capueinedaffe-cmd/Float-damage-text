@@ -18,10 +18,7 @@ import arc.math.geom.Rect;
 import arc.scene.style.Drawable;
 import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.ButtonGroup;
-import arc.scene.ui.Label;
 import arc.scene.ui.TextButton;
-import arc.scene.ui.TextField;
-import arc.scene.ui.TextField.TextFieldFilter;
 import arc.scene.ui.layout.Scl;
 import arc.struct.IntSet;
 import arc.struct.LongMap;
@@ -137,23 +134,20 @@ public class DamageNumbersMod extends Mod {
     private static final float SCATTER_DISTANCE = 30f;     // Random scatter: distancia a la que se queda
     private static final float SCATTER_SECONDS = 0.35f;    // Random scatter: tiempo en llegar a ese punto
 
-    // --- Efectos criticos (menu "Damage render") ---
-    private static final String KEY_CRIT_ENABLED = "damage-numbers-crit-enabled";
-    private static final String KEY_CRIT_FUSED = "damage-numbers-crit-threshold-fused";
-    private static final String KEY_CRIT_SINGLE = "damage-numbers-crit-threshold-single";
+    // --- Enhanced effects (menu "Damage render") ---
+    private static final String KEY_CRIT_ENABLED = "damage-numbers-crit-enabled"; // misma clave de antes: conserva lo que ya tenian elegido
     private static final String KEY_PARTICLE_LIMIT = "damage-numbers-particle-limit"; // "performance" | "regular" | "demanding" | "extreme"
     private static final String KEY_PARTICLE_SCALE = "damage-numbers-particle-scale";
     private static final String PARTICLE_LIMIT_DEFAULT = "regular";
-    private static final int CRIT_FUSED_DEFAULT = 5000, CRIT_SINGLE_DEFAULT = 500, CRIT_MAX = 999999;
     private static final int PARTICLE_SCALE_DEFAULT = 100, PARTICLE_SCALE_MIN = 25, PARTICLE_SCALE_MAX = 300;
 
     // --- Particulas y efectos criticos: todo se dibuja por codigo (sin imagenes) ---
     private static final float PARTICLE_BASE_SIZE = 10f;   // tamano de referencia de las particulas y cristales (unidades de mundo, texto tamano 2.0, "Particle size" 100%)
     private static final int PARTICLE_MAX_PER_TEXT = 24;   // tope de particulas simultaneas en un solo texto
 
-    // Efectos criticos disponibles (uno por estado de la bala). Los demas llegan en proximas entregas.
+    // Enhanced effects disponibles: uno por estado de la bala, mas cinetico y area para el resto de balas.
     private static final int FX_NONE = 0, FX_MELTING = 1, FX_FREEZING = 2, FX_CORRODED = 3, FX_WET = 4, FX_TARRED = 5,
-            FX_BURNING = 6, FX_SHOCKED = 7, FX_BLASTED = 8;
+            FX_BURNING = 6, FX_SHOCKED = 7, FX_BLASTED = 8, FX_KINETIC = 9, FX_AREA = 10;
 
     // --- Freezing: cristales de hielo en tres fases pulsantes, texto celeste y nieve ---
     // Fase 1: tres cristales pequenos. Fase 2: crecen y aparece otro pequeno. Fase 3: el central crece mas.
@@ -292,6 +286,38 @@ public class DamageNumbersMod extends Mod {
     private static final float BLAST_SMOKE_SIZE = 0.45f;   // radio final del humo (fraccion del tamano de referencia)
     private static final String BLAST_TEXTURE_SPRITE = "blasted-texture"; // assets/sprites/blasted-texture.png
     private static final float BLAST_TEXTURE_TILE = 1.0f;  // lado de un cuadro de la textura = alto del texto x este valor
+
+    // --- Kinetic: una franja diagonal gruesa de luz recorre el texto (lenta, casi instantanea, frenada abrupta) ---
+    private static final float KINETIC_SWEEP_SECONDS = 0.6f; // duracion del recorrido completo
+    private static final float KINETIC_FADE_SECONDS = 0.2f;  // la luz se apaga despues de detenerse
+    private static final float KINETIC_SLOW_END = 0.30f;     // fin de la fase lenta (fraccion del recorrido)
+    private static final float KINETIC_FAST_END = 0.58f;     // fin de la fase rapida; despues frena de golpe
+    private static final float KINETIC_SLOW_REACH = 0.10f;   // cuanto avanza la franja en la fase lenta
+    private static final float KINETIC_FAST_REACH = 0.90f;   // por donde va al terminar la fase rapida
+    private static final float KINETIC_BAND_HALF = 0.5f;     // mitad del grosor de la franja (x alto del texto)
+    private static final float KINETIC_SLANT = 0.5f;         // inclinacion de la franja (0 = vertical)
+    private static final float KINETIC_STRENGTH = 0.85f;     // cuanto se aclara el texto en el centro de la franja
+    private static final float KINETIC_STOP_INSET = 0.5f;    // donde se detiene, antes del borde derecho (x mitad de la franja)
+
+    // --- Area: una esfera blanca cae sobre el centro del texto y explota ---
+    private static final Color AREA_SMOKE = Color.valueOf("8f8f8f");
+    private static final float AREA_FALL_SECONDS = 0.22f;    // lo que tarda la esfera en caer
+    private static final float AREA_BALL_RADIUS = 1.3f;      // radio de la esfera (x mitad del alto del texto)
+    private static final float AREA_FLASH_SECONDS = 0.14f;   // destello blanco al impactar
+    private static final float AREA_WAVE_SECONDS = 0.45f;    // duracion de la onda expansiva blanca
+    private static final float AREA_SMOKE_LIFE_MIN = 0.35f, AREA_SMOKE_LIFE_MAX = 0.6f; // el humo siempre dura menos que el texto
+    private static final float AREA_SMOKE_SIZE = 0.5f;       // radio final del humo (fraccion del tamano de referencia)
+    private static final float AREA_CHUNK_LIFE_MIN = 0.4f, AREA_CHUNK_LIFE_MAX = 0.75f;
+    private static final float AREA_CHUNK_SPEED_MIN = 14f, AREA_CHUNK_SPEED_MAX = 34f; // unidades por segundo (texto tamano 2.0)
+    private static final float AREA_CHUNK_GRAVITY = 90f;     // aceleracion hacia abajo (texto tamano 2.0)
+    private static final float AREA_CHUNK_SIZE = 0.09f;      // radio del trozo (fraccion del tamano de referencia)
+    private static final float ONE_SHOT_RESTART_MIN = 0.6f;  // texto fusionado: segundos minimos entre repeticiones de Kinetic/Area
+
+    // --- Iconos propios de cada tipo de dano (assets/sprites/<nombre>.png) ---
+    // Si falta alguno se usa el icono del estado alterado.
+    private static final String ICON_BURNING = "burning-icon", ICON_BLASTED = "blasted-icon",
+            ICON_MELTING = "melting-icon", ICON_FREEZING = "freezing-icon", ICON_WET = "wet-icon",
+            ICON_TARRED = "tarred-icon", ICON_SHOCKED = "shocked-icon", ICON_CORRODED = "corroded-icon";
     private static final int RING_SEG = 28;                // lados con los que se dibuja un aro
     private static final float[] RING_COS = new float[RING_SEG], RING_SIN = new float[RING_SEG];
     static {
@@ -647,6 +673,7 @@ public class DamageNumbersMod extends Mod {
                 else if (p.critEffect == FX_BURNING) drawBurningText(p, textCx, y, pose);
                 else if (p.critEffect == FX_SHOCKED) drawShockedText(p, textCx, y, pose.scale, pose.alpha);
                 else if (p.critEffect == FX_BLASTED) drawBlastedText(p, textCx, y, pose.scale, pose.alpha);
+                else if (p.critEffect == FX_KINETIC) drawKineticText(p, textCx, y, pose.scale, pose.alpha);
                 else drawText(p, textCx, y, pose.scale, pose.alpha);
 
                 // Los cristales de hielo van por delante del texto (al 50 % de opacidad)
@@ -815,13 +842,12 @@ public class DamageNumbersMod extends Mod {
                 table.pref(check(KEY_ANIM_SHRINK, false,
                         "Shrink", "The text shrinks near the end until it disappears. Together with Grow, it starts small, reaches its real size and shrinks at the end."));
 
-                // Widget "Damage render": efectos criticos y particulas
+                // Widget "Damage render": enhanced effects y particulas
                 table.pref(headerSetting("Damage render", DAMAGE_RENDER_ICON_SPRITE));
                 table.pref(check(KEY_CRIT_ENABLED, true,
-                        "Critical effects", "When the damage reaches the threshold, the text gets the effect of its bullet's status (particles, glow and text style)."));
-                table.pref(thresholdSetting());
+                        "Enhanced effects", "Every damage text gets an effect that depends on its damage type: the status of its bullet, kinetic or area (particles, glow and text style)."));
                 table.pref(percentSlider(KEY_PARTICLE_SCALE, PARTICLE_SCALE_DEFAULT, PARTICLE_SCALE_MIN, PARTICLE_SCALE_MAX,
-                        "Particle size", "Size of the critical effect particles. They also follow the Text size setting."));
+                        "Particle size", "Size of the enhanced effect particles. They also follow the Text size setting."));
                 table.pref(particleLimitSetting());
             });
         } catch (Exception ex) {
@@ -926,47 +952,6 @@ public class DamageNumbersMod extends Mod {
         };
     }
 
-    // Umbral de dano para el efecto critico: un solo campo numerico que cambia de valor y de
-    // titulo segun "Damage text fusion" este activa (texto fusionado) o no.
-    private Setting thresholdSetting() {
-        Core.settings.defaults(KEY_CRIT_FUSED, CRIT_FUSED_DEFAULT);
-        Core.settings.defaults(KEY_CRIT_SINGLE, CRIT_SINGLE_DEFAULT);
-
-        return new Setting(KEY_CRIT_SINGLE) {
-            @Override
-            public void add(SettingsTable table) {
-                float width = Math.min(500f, Core.graphics.getWidth() / 1.2f / Scl.scl(1f));
-                int[] shownMode = {-1}; // -1 = aun no se mostro, 0 = sin fusion, 1 = fusionado
-
-                table.table(row -> {
-                    row.left();
-                    Label label = row.add("").left().growX().get();
-                    TextField field = row.field("", TextFieldFilter.digitsOnly, str -> {
-                        if (str.isEmpty()) return;
-                        try {
-                            int v = Mathf.clamp(Integer.parseInt(str), 1, CRIT_MAX);
-                            Core.settings.put(damageFusion() ? KEY_CRIT_FUSED : KEY_CRIT_SINGLE, v);
-                        } catch (NumberFormatException ignored) {
-                        }
-                    }).width(120f).padLeft(4f).get();
-
-                    // Cambia titulo y valor cuando se activa o desactiva la fusion de dano
-                    row.update(() -> {
-                        int mode = damageFusion() ? 1 : 0;
-                        if (mode == shownMode[0]) return;
-                        shownMode[0] = mode;
-                        label.setText(mode == 1 ? "Critical threshold (fused text)" : "Critical threshold (unfused text)");
-                        field.setText(String.valueOf(critThreshold(mode == 1)));
-                    });
-                }).width(width).left().padTop(4f).row();
-
-                table.add("Minimum damage for the critical effect to appear (1 to " + CRIT_MAX + "). "
-                                + "Fused text and unfused text each keep their own value; only the one that applies right now is shown.")
-                        .wrap().width(width).left().color(Color.lightGray).padTop(4f).padBottom(6f).row();
-            }
-        };
-    }
-
     // Limite de particulas vivas a la vez: una lista de botones con su descripcion.
     private Setting particleLimitSetting() {
         Core.settings.defaults(KEY_PARTICLE_LIMIT, PARTICLE_LIMIT_DEFAULT);
@@ -983,7 +968,7 @@ public class DamageNumbersMod extends Mod {
                         {"Performance", "performance", "Up to 100 particles at once."},
                         {"Regular", "regular", "Up to 300 particles at once."},
                         {"Demanding", "demanding", "Up to 600 particles at once."},
-                        {"Extreme", "extreme", "No limit. It can slow the game down when many critical texts appear together."}
+                        {"Extreme", "extreme", "No limit. It can slow the game down when many enhanced effects appear together."}
                 };
                 for (String[] option : options) {
                     String value = option[1];
@@ -1057,12 +1042,6 @@ public class DamageNumbersMod extends Mod {
 
     private boolean critEnabled() {
         return Core.settings.getBool(KEY_CRIT_ENABLED, true);
-    }
-
-    // Umbral de dano critico: "fused" para texto fusionado, o el de texto sin fusionar.
-    private int critThreshold(boolean fused) {
-        return Mathf.clamp(Core.settings.getInt(fused ? KEY_CRIT_FUSED : KEY_CRIT_SINGLE,
-                fused ? CRIT_FUSED_DEFAULT : CRIT_SINGLE_DEFAULT), 1, CRIT_MAX);
     }
 
     private String particleLimitMode() {
@@ -1146,7 +1125,7 @@ public class DamageNumbersMod extends Mod {
                 existing.sumTrue += trueDamage;
                 String text = formatDamageText(existing.sumRaw, existing.sumTrue);
                 layoutPopup(existing, text, teamColor(isAlly), pickIcon(type, existing.sumTrue), x, y);
-                applyCritical(existing, type, criticalValue(existing.sumRaw, existing.sumTrue), true);
+                applyCritical(existing, type);
                 return;
             }
 
@@ -1157,12 +1136,12 @@ public class DamageNumbersMod extends Mod {
             created.hasKey = true;
             created.fusionKey = key;
             fusionIndex.put(key, created);
-            applyCritical(created, type, criticalValue(raw, trueDamage), true);
+            applyCritical(created, type);
             return;
         }
 
         Popup single = spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly), pickIcon(type, trueDamage), x, y);
-        applyCritical(single, type, criticalValue(raw, trueDamage), false);
+        applyCritical(single, nulledHit ? null : type); // un golpe anulado no lleva efecto
     }
 
     // Texto de estado (mojado/alquitranado/congelante).
@@ -1183,7 +1162,7 @@ public class DamageNumbersMod extends Mod {
         boolean fuse = statusFusion();
         if (fuse && fusionIndex.containsKey(key)) return;
 
-        Popup created = spawnPair(status.localizedName, statusColor(status), status.uiIcon, x, y);
+        Popup created = spawnPair(status.localizedName, statusColor(status), statusIcon(status), x, y);
         if (fuse) {
             created.hasKey = true;
             created.fusionKey = key;
@@ -1383,17 +1362,19 @@ public class DamageNumbersMod extends Mod {
     //  Efectos criticos y particulas
     // =====================================================================
 
-    // Numero que se compara con el umbral: el crudo en modo "raw"; en "true" y "both",
-    // el dano verdadero (lo que realmente se inflige).
-    private float criticalValue(float raw, float trueDamage) {
-        return damageMode().equals("raw") ? raw : trueDamage;
-    }
-
-    // Activa o quita el efecto critico de un texto segun su dano y el estado de su bala.
-    private void applyCritical(Popup p, BulletType type, float value, boolean fused) {
-        int effect = FX_NONE;
-        if (critEnabled() && value >= critThreshold(fused)) effect = critEffectFor(type);
+    // Activa o quita el enhanced effect de un texto segun el tipo de dano de su bala.
+    private void applyCritical(Popup p, BulletType type) {
+        int effect = critEnabled() ? critEffectFor(type) : FX_NONE;
         p.motionSpeed = effect == FX_TARRED ? TAR_MOTION_SPEED : 1f; // Tarred: todo va a la mitad
+
+        // Kinetic y Area ocurren una sola vez: en un texto fusionado que recibe otro golpe
+        // (la animacion se reinicio) se repiten, con un minimo de tiempo entre una y otra.
+        if (p.critEffect == effect && (effect == FX_KINETIC || effect == FX_AREA)
+                && p.age < 0.0001f && p.critAge >= ONE_SHOT_RESTART_MIN) {
+            p.critAge = 0f;
+            p.fxInit = false;
+        }
+
         if (p.critEffect != effect) {
             p.critEffect = effect;
             p.critAge = 0f;
@@ -1410,7 +1391,8 @@ public class DamageNumbersMod extends Mod {
         }
     }
 
-    // Efecto critico segun el estado de la bala (los demas estados llegan mas adelante).
+    // Enhanced effect segun el tipo de dano de la bala: primero su estado; si no tiene uno con
+    // efecto, area (explosiva) o cinetico. Las balas electricas y de fuego sin estado no llevan.
     private int critEffectFor(BulletType type) {
         if (type == null) return FX_NONE;
         if (type.status == StatusEffects.melting) return FX_MELTING;
@@ -1421,7 +1403,13 @@ public class DamageNumbersMod extends Mod {
         if (type.status == StatusEffects.burning) return FX_BURNING;
         if (type.status == StatusEffects.shocked) return FX_SHOCKED;
         if (type.status == StatusEffects.blasted) return FX_BLASTED;
-        return FX_NONE;
+
+        // Misma clasificacion que iconFor: electrico y fuego tienen su propio tipo de dano
+        boolean isElectric = type.status == StatusEffects.electrified || type.lightningDamage >= 0;
+        boolean isFire = type.makeFire;
+        if (isElectric || isFire) return FX_NONE;
+
+        return type.splashDamage > 0 ? FX_AREA : FX_KINETIC;
     }
 
     // Particulas del efecto critico de un texto (cx, cy = centro del texto).
@@ -1434,6 +1422,7 @@ public class DamageNumbersMod extends Mod {
         else if (p.critEffect == FX_BURNING) updateBurningFront(p, dt, cx, cy, pose);
         else if (p.critEffect == FX_SHOCKED) updateShock(p, dt, cx, cy, pose);
         else if (p.critEffect == FX_BLASTED) updateBlast(p, dt, cx, cy, pose);
+        else if (p.critEffect == FX_AREA) updateArea(p, dt, cx, cy, pose);
     }
 
     // Melting: burbujas de lava en bucle y destellos de luz.
@@ -2823,6 +2812,278 @@ public class DamageNumbersMod extends Mod {
         });
     }
 
+    // ---------------------------------------------------------------------
+    //  Kinetic
+    // ---------------------------------------------------------------------
+
+    // Kinetic: una franja diagonal gruesa de luz recorre las letras. Empieza lenta, acelera casi
+    // al instante y frena de golpe hasta detenerse; despues se apaga. Es un shader sobre el texto:
+    // solo aclara el relleno de las letras y deja el contorno oscuro de la fuente como esta.
+    // Fuera del recorrido el texto se dibuja normal; si el shader no compila, tambien.
+    private static final String KINETIC_FRAG =
+            "uniform sampler2D u_texture;\n"
+          + "uniform float u_pos;\n"
+          + "uniform float u_half;\n"
+          + "uniform float u_slant;\n"
+          + "uniform float u_str;\n"
+          + "varying vec4 v_color;\n"
+          + "varying vec2 v_texCoords;\n"
+          + "varying vec2 v_rel;\n"
+          + "void main(){\n"
+          + "    vec4 g = texture2D(u_texture, v_texCoords);\n"
+          + "    float t = v_rel.x - v_rel.y * u_slant;\n"
+          + "    float band = 1.0 - smoothstep(u_half * 0.45, u_half, abs(t - u_pos));\n"
+          + "    float fill = smoothstep(0.45, 0.85, g.r);\n"
+          + "    vec3 base = g.rgb * v_color.rgb;\n"
+          + "    vec3 col = mix(base, vec3(1.0), band * u_str * fill);\n"
+          + "    gl_FragColor = vec4(col, g.a * v_color.a);\n"
+          + "}\n";
+
+    private Shader kineticShader;
+    private boolean kineticShaderFailed;
+    private float kinOriginX, kinOriginY, kinPos, kinHalf, kinStr;
+
+    private boolean ensureKineticShader() {
+        if (kineticShader != null) return true;
+        if (kineticShaderFailed) return false;
+
+        try {
+            Shader sh = new Shader(BLAST_VERT, KINETIC_FRAG) {
+                @Override
+                public void apply() {
+                    setUniformf("u_origin", kinOriginX, kinOriginY);
+                    setUniformf("u_pos", kinPos);
+                    setUniformf("u_half", kinHalf);
+                    setUniformf("u_slant", KINETIC_SLANT);
+                    setUniformf("u_str", kinStr);
+                }
+            };
+            if (!sh.isCompiled()) {
+                Log.err("[Damage Numbers] El shader de Kinetic no compilo: " + sh.getLog());
+                kineticShaderFailed = true;
+                return false;
+            }
+            kineticShader = sh;
+            return true;
+        } catch (Throwable t) {
+            Log.err("[Damage Numbers] No se pudo crear el shader de Kinetic: " + t);
+            kineticShaderFailed = true;
+            return false;
+        }
+    }
+
+    // Avance de la franja (0 a 1) segun el tiempo del recorrido (0 a 1): fase lenta, fase casi
+    // instantanea a toda velocidad y frenada abrupta hasta quedar quieta.
+    private static float kineticProgress(float t) {
+        if (t < KINETIC_SLOW_END) {
+            float u = t / KINETIC_SLOW_END;
+            return KINETIC_SLOW_REACH * u * u;
+        }
+        if (t < KINETIC_FAST_END) {
+            float u = (t - KINETIC_SLOW_END) / (KINETIC_FAST_END - KINETIC_SLOW_END);
+            return Mathf.lerp(KINETIC_SLOW_REACH, KINETIC_FAST_REACH, u);
+        }
+        float u = (t - KINETIC_FAST_END) / (1f - KINETIC_FAST_END);
+        float brake = 1f - (1f - u) * (1f - u) * (1f - u) * (1f - u);
+        return Mathf.lerp(KINETIC_FAST_REACH, 1f, brake);
+    }
+
+    private void drawKineticText(Popup p, float cx, float cy, float scale, float alpha) {
+        float ca = p.critAge;
+        if (ca >= KINETIC_SWEEP_SECONDS + KINETIC_FADE_SECONDS || !ensureKineticShader()) {
+            drawText(p, cx, cy, scale, alpha);
+            return;
+        }
+
+        float w = p.textWidth * scale;
+        float h = p.textHeight * scale;
+        float half = Math.max(h * KINETIC_BAND_HALF, 0.001f);
+        float tStart = -KINETIC_SLANT * h - half;              // empieza justo fuera, a la izquierda
+        float tEnd = w - half * KINETIC_STOP_INSET;            // se detiene sobre las ultimas letras
+        float prog = kineticProgress(Mathf.clamp(ca / KINETIC_SWEEP_SECONDS, 0f, 1f));
+        float pos = tStart + (tEnd - tStart) * prog;
+        float fadeOut = ca <= KINETIC_SWEEP_SECONDS ? 1f : 1f - (ca - KINETIC_SWEEP_SECONDS) / KINETIC_FADE_SECONDS;
+        float str = KINETIC_STRENGTH * Mathf.clamp(fadeOut, 0f, 1f);
+        float ox = cx - w / 2f;
+        float oy = cy - h / 2f;
+
+        // Igual que Blasted: el dibujo esta ordenado por capas, asi que el shader va dentro de Draw.draw
+        // y sus valores se fijan dentro (el bloque corre mas tarde en el mismo cuadro).
+        Draw.draw(Draw.z(), () -> {
+            kinOriginX = ox;
+            kinOriginY = oy;
+            kinPos = pos;
+            kinHalf = half;
+            kinStr = str;
+
+            Draw.shader(kineticShader);
+            drawText(p, cx, cy, scale, alpha);
+            Draw.shader();
+        });
+    }
+
+    // ---------------------------------------------------------------------
+    //  Area
+    // ---------------------------------------------------------------------
+
+    // Area, por delante del texto: una esfera blanca grande cae sobre el centro y explota. Al
+    // impactar hay un destello, una onda expansiva blanca, humo gris que se queda quieto y se
+    // desvanece antes que el texto (en particles) y trozos blancos brillantes que caen y desaparecen
+    // rapido (en sparks). El impacto arranca una sola vez por efecto (fxInit).
+    private void updateArea(Popup p, float dt, float cx, float cy, Pose pose) {
+        if (p.particles == null) p.particles = new Seq<>();
+        if (p.sparks == null) p.sparks = new Seq<>();
+
+        float sizeFactor = p.fontSize / 2f * particleSizeMul;
+        float size = PARTICLE_BASE_SIZE * sizeFactor;
+        float halfW = p.textWidth / 2f;
+        float halfH = p.textHeight / 2f;
+        float ballR = Math.max(halfH * AREA_BALL_RADIUS, size * 0.4f);
+        float sc = pose.scale;
+        float ca = p.critAge;
+
+        // Impacto: nacen el humo y los trozos
+        if (!p.fxInit && ca >= AREA_FALL_SECONDS) {
+            p.fxInit = true;
+            float remaining = Math.max(p.lifetime - p.age, 0.1f);
+
+            int puffs = Mathf.clamp(Math.round(p.textWidth / (size * 0.9f)), 4, 9);
+            for (int i = 0; i < puffs && liveParticles < particleCap; i++) {
+                Particle pt = new Particle();
+                pt.offX = Mathf.random(-halfW * 0.8f, halfW * 0.8f);
+                pt.offY = Mathf.random(-halfH * 0.7f, halfH * 0.7f);
+                pt.sizeMul = Mathf.random(0.8f, 1.3f);
+                pt.life = Math.min(Mathf.random(AREA_SMOKE_LIFE_MIN, AREA_SMOKE_LIFE_MAX), remaining * 0.7f);
+                pt.age = 0f;
+                p.particles.add(pt);
+                liveParticles++;
+            }
+
+            int chunks = Mathf.clamp(Math.round(p.textWidth / (size * 0.5f)), 6, 14);
+            for (int i = 0; i < chunks && liveParticles < particleCap; i++) {
+                Particle pt = new Particle();
+                pt.offX = Mathf.random(-halfW * 0.35f, halfW * 0.35f);
+                pt.offY = Mathf.random(-halfH * 0.2f, halfH * 0.2f);
+                float ang = Mathf.random(Mathf.PI * 0.08f, Mathf.PI * 0.92f); // abanico hacia arriba
+                float speed = Mathf.random(AREA_CHUNK_SPEED_MIN, AREA_CHUNK_SPEED_MAX) * sizeFactor;
+                pt.vx = Mathf.cos(ang) * speed;
+                pt.vy = Mathf.sin(ang) * speed;
+                pt.sizeMul = Mathf.random(0.7f, 1.3f);
+                pt.phase = Mathf.random(Mathf.PI2); // giro inicial del trozo
+                pt.life = Mathf.random(AREA_CHUNK_LIFE_MIN, AREA_CHUNK_LIFE_MAX);
+                pt.age = 0f;
+                p.sparks.add(pt);
+                liveParticles++;
+            }
+        }
+
+        // 1) La esfera blanca cae acelerando sobre el centro del texto
+        if (ca < AREA_FALL_SECONDS) {
+            float t = ca / AREA_FALL_SECONDS;
+            float drop = halfH + ballR * 2.5f + size;
+            float by = cy + (1f - t * t) * drop * sc;
+            float a = Math.min(1f, t * 5f) * pose.alpha;
+
+            Draw.blend(Blending.additive);
+            radialGlow(cx, by, ballR * 1.6f * sc, ballR * 1.6f * sc, Color.white, 0.5f * a);
+            Draw.blend();
+            Draw.color(Color.white, a);
+            Fill.circle(cx, by, ballR * sc);
+        }
+
+        // 2) Destello y onda expansiva blanca al impactar
+        float ia = ca - AREA_FALL_SECONDS; // segundos desde el impacto
+        if (ia >= 0f && ia < AREA_FLASH_SECONDS) {
+            float t = ia / AREA_FLASH_SECONDS;
+            float fade = (1f - t) * pose.alpha;
+
+            Draw.blend(Blending.additive);
+            radialGlow(cx, cy, ballR * (1.5f + t) * sc, ballR * (1.5f + t) * sc, Color.white, 0.9f * fade);
+            Draw.blend();
+            Draw.color(Color.white, 0.9f * fade);
+            Fill.circle(cx, cy, ballR * (1f + 0.4f * t) * sc);
+        }
+        if (ia >= 0f && ia < AREA_WAVE_SECONDS) {
+            float t = ia / AREA_WAVE_SECONDS;
+            float g = 1f - (1f - t) * (1f - t);
+            float fade = (float) Math.pow(1f - t, 1.3) * pose.alpha;
+            float rx = Mathf.lerp(ballR * 0.7f, halfW + size * 1.2f, g) * sc;
+            float ry = Mathf.lerp(ballR * 0.7f, halfH + size * 1.2f, g) * sc;
+
+            Draw.blend(Blending.additive);
+            Draw.color(Color.white, 0.9f * fade);
+            ringEllipse(cx, cy, rx, ry, size * 0.14f * (1f - t) * sc);
+            Draw.blend();
+        }
+
+        // 3) Humo gris: se queda quieto, crece un poco y se desvanece antes que el texto
+        for (int i = p.particles.size - 1; i >= 0; i--) {
+            Particle pt = p.particles.get(i);
+            pt.age += dt;
+            if (pt.age >= pt.life) {
+                p.particles.remove(i);
+                liveParticles--;
+                continue;
+            }
+
+            float t = pt.age / pt.life;
+            float grow = 0.55f + 0.45f * (1f - (1f - t) * (1f - t));
+            float a = 0.75f * (1f - t) * pose.alpha;
+            if (a <= 0.01f) continue;
+
+            Draw.color(AREA_SMOKE, a);
+            Fill.circle(cx + pt.offX * sc, cy + pt.offY * sc, AREA_SMOKE_SIZE * size * pt.sizeMul * grow * sc);
+        }
+
+        // 4) Trozos blancos brillantes: salen hacia arriba, caen por la gravedad y se apagan rapido
+        for (int i = p.sparks.size - 1; i >= 0; i--) {
+            Particle pt = p.sparks.get(i);
+            pt.age += dt;
+            if (pt.age >= pt.life) {
+                p.sparks.remove(i);
+                liveParticles--;
+                continue;
+            }
+
+            pt.vy -= AREA_CHUNK_GRAVITY * sizeFactor * dt;
+            pt.offX += pt.vx * dt;
+            pt.offY += pt.vy * dt;
+
+            float t = pt.age / pt.life;
+            float a = Math.min(1f, (1f - t) * 2.5f) * pose.alpha;
+            float r = AREA_CHUNK_SIZE * size * pt.sizeMul * (1f - 0.35f * t) * sc;
+            float x = cx + pt.offX * sc;
+            float y = cy + pt.offY * sc;
+            float rot = pt.phase + pt.age * 8f;
+            float cs = Mathf.cos(rot) * r;
+            float sn = Mathf.sin(rot) * r;
+
+            Draw.color(Color.white, a);
+            Fill.quad(x - cs + sn, y - sn - cs,
+                    x + cs + sn, y + sn - cs,
+                    x + cs - sn, y + sn + cs,
+                    x - cs - sn, y - sn + cs);
+        }
+
+        // Brillo suave alrededor de cada trozo (una sola pasada aditiva)
+        if (p.sparks.size > 0) {
+            Draw.blend(Blending.additive);
+            for (int i = 0; i < p.sparks.size; i++) {
+                Particle pt = p.sparks.get(i);
+                float t = pt.age / pt.life;
+                float a = Math.min(1f, (1f - t) * 2.5f) * pose.alpha * 0.35f;
+                if (a <= 0.01f) continue;
+                Draw.color(Color.white, a);
+                Fill.circle(cx + pt.offX * sc, cy + pt.offY * sc,
+                        AREA_CHUNK_SIZE * size * pt.sizeMul * 2.2f * sc);
+            }
+            Draw.blend();
+        }
+
+        Lines.stroke(1f);
+        Draw.reset();
+    }
+
     // Mide donde empieza cada letra del texto (a escala 1) para poder dibujarlas una a una.
     private void ensureCharLayout(Popup p) {
         if (p.charStrings != null) return;
@@ -3002,6 +3263,20 @@ public class DamageNumbersMod extends Mod {
         }
     }
 
+    // Icono propio de un tipo de dano; si el archivo no esta, el del estado alterado.
+    private TextureRegion damageIcon(String sprite, StatusEffect fallback) {
+        TextureRegion custom = getCustomSprite(sprite);
+        return custom != null ? custom : fallback.uiIcon;
+    }
+
+    // Icono de un texto de estado (Wet, Tarred, Freezing): el mismo icono propio del tipo de dano.
+    private TextureRegion statusIcon(StatusEffect status) {
+        if (status == StatusEffects.wet) return damageIcon(ICON_WET, status);
+        if (status == StatusEffects.tarred) return damageIcon(ICON_TARRED, status);
+        if (status == StatusEffects.freezing) return damageIcon(ICON_FREEZING, status);
+        return status.uiIcon;
+    }
+
     // --- Clasifica el tipo de dano y devuelve el icono a dibujar (o null si no hay) ---
     private TextureRegion iconFor(BulletType type) {
         if (type == null) return null;
@@ -3009,17 +3284,18 @@ public class DamageNumbersMod extends Mod {
         boolean isElectric = type.status == StatusEffects.shocked
                 || type.status == StatusEffects.electrified
                 || type.lightningDamage >= 0;
-        if (isElectric) return StatusEffects.shocked.uiIcon;
+        if (isElectric) return damageIcon(ICON_SHOCKED, StatusEffects.shocked);
 
-        if (type.status == StatusEffects.freezing) return StatusEffects.freezing.uiIcon;
+        if (type.status == StatusEffects.freezing) return damageIcon(ICON_FREEZING, StatusEffects.freezing);
 
         boolean isFire = type.status == StatusEffects.burning || type.makeFire;
-        if (isFire) return StatusEffects.burning.uiIcon;
+        if (isFire) return damageIcon(ICON_BURNING, StatusEffects.burning);
 
-        if (type.status == StatusEffects.blasted) return StatusEffects.blasted.uiIcon;
-        if (type.status == StatusEffects.corroded) return StatusEffects.corroded.uiIcon;
-        if (type.status == StatusEffects.melting) return StatusEffects.melting.uiIcon;
-        if (type.status == StatusEffects.wet) return StatusEffects.wet.uiIcon;
+        if (type.status == StatusEffects.blasted) return damageIcon(ICON_BLASTED, StatusEffects.blasted);
+        if (type.status == StatusEffects.corroded) return damageIcon(ICON_CORRODED, StatusEffects.corroded);
+        if (type.status == StatusEffects.melting) return damageIcon(ICON_MELTING, StatusEffects.melting);
+        if (type.status == StatusEffects.wet) return damageIcon(ICON_WET, StatusEffects.wet);
+        if (type.status == StatusEffects.tarred) return damageIcon(ICON_TARRED, StatusEffects.tarred);
 
         if (type.splashDamage > 0) return getCustomSprite("icon-splash");
 
