@@ -647,7 +647,7 @@ public class DamageNumbersMod extends Mod {
                 float y = p.anchorY + pose.dy;
 
                 // Fuera de la camara no dibujamos nada
-                float reach = (Math.abs(p.iconDx) + p.textDx + p.textWidth) * pose.scale + iconSize;
+                float reach = (Math.abs(p.iconDx) + p.textDx + p.textWidth) * pose.scale + iconSizeOf(p);
                 if (!view.overlaps(x - reach, y - reach, reach * 2f, reach * 2f)) continue;
 
                 float textCx = p.anchorX + pose.dx + p.textDx * pose.scale;
@@ -657,7 +657,7 @@ public class DamageNumbersMod extends Mod {
                     // destello) que haya dejado un efecto anterior en este frame.
                     Draw.reset();
                     Draw.color(Color.white, pose.alpha);
-                    float size = iconSize * pose.scale;
+                    float size = iconSizeOf(p) * pose.scale;
                     Draw.rect(p.icon, p.anchorX + pose.dx + p.iconDx * pose.scale, y, size, size);
                     Draw.reset();
                 }
@@ -1218,6 +1218,11 @@ public class DamageNumbersMod extends Mod {
     }
 
     // Coloca (o recoloca) un popup y reinicia su animacion.
+    // Tamano del icono de un texto: crece y se encoge junto con "Text size" (con tamano 2.0 mide iconSize).
+    private float iconSizeOf(Popup p) {
+        return iconSize * p.fontSize / 2f;
+    }
+
     private void layoutPopup(Popup p, String text, Color color, TextureRegion icon, float anchorX, float anchorY) {
         p.text = text;
         p.color.set(color);
@@ -1247,7 +1252,7 @@ public class DamageNumbersMod extends Mod {
         if (p.icon != null) {
             float gap = halfSpacing();
             p.textDx = gap + p.textWidth / 2f;
-            p.iconDx = -gap - iconSize / 2f;
+            p.iconDx = -gap - iconSizeOf(p) / 2f;
         } else {
             p.textDx = 0f;
             p.iconDx = 0f;
