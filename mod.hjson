@@ -17,3 +17,5 @@ TEXT BROOO!!!!!!
 "main": "damage_numbers.DamageNumbersMod"
 
 "hidden": false
+
+"java": true
