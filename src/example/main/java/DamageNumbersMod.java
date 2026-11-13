@@ -101,6 +101,17 @@ public class DamageNumbersMod extends Mod {
     private static final int TEXT_SIZE_DEFAULT = 20, TEXT_SIZE_MIN = 1, TEXT_SIZE_MAX = 50;
     private static final int ICON_SPACING_DEFAULT = 3, ICON_SPACING_MIN = 1, ICON_SPACING_MAX = 20;
 
+    // --- Optimization (menu "Optimization") ---
+    private static final String KEY_ROUNDED_ENABLED = "damage-numbers-rounded-enabled";
+    private static final String KEY_ROUNDED_RANGE = "damage-numbers-rounded-range";
+    private static final String KEY_LIMITER_ENABLED = "damage-numbers-limiter-enabled";
+    private static final String KEY_LIMITER_MAX = "damage-numbers-limiter-max";
+    private static final String KEY_SHOW_STATUS = "damage-numbers-show-status-texts";
+    private static final String KEY_SHOW_NULLED = "damage-numbers-show-nulled-texts";
+    private static final int ROUNDED_RANGE_DEFAULT = 75, ROUNDED_RANGE_MIN = 5, ROUNDED_RANGE_MAX = 100; // unidades de mundo (8 = 1 bloque)
+    private static final int LIMITER_DEFAULT = 50, LIMITER_MIN = 5, LIMITER_MAX = 500;
+    private static final float ROUNDED_WINDOW_SECONDS = 0.2f; // Rounded damage sin fusion: ventana para sumar golpes al primer texto
+
     // Icono de la categoria en el menu: assets/sprites/damage-numbers-icon.png
     // (el juego le antepone el nombre del mod, por eso el nombre final repite "damage-numbers")
     private static final String CATEGORY_ICON_SPRITE = "damage-numbers-icon";
@@ -111,6 +122,7 @@ public class DamageNumbersMod extends Mod {
     private static final String ANIMATION_ICON_SPRITE = "animation-effect-icon";
     private static final String DISPLACEMENT_ICON_SPRITE = "displacement-effect-icon";
     private static final String DAMAGE_RENDER_ICON_SPRITE = "damage-render-icon";
+    private static final String OPTIMIZATION_ICON_SPRITE = "optimizacion-icon";
     private static final String DAMAGE_TYPE_ICON_SPRITE = "icon-kinetic";
 
     // --- Efectos de animacion (tiempos en segundos, escalas como multiplicador) ---
@@ -419,8 +431,11 @@ public class DamageNumbersMod extends Mod {
         Seq<Arc> arcs;               // arcos electricos (Shocked)
         final float fxSeed = Mathf.random(100f); // desfasa los movimientos de cada texto
 
-        // Datos de fusion
+        // Datos de fusion y de Rounded damage
         float sumRaw, sumTrue;       // dano acumulado (fusion de dano)
+        float sinceSpawn;            // segundos desde que nacio el texto (no se reinicia)
+        boolean mergeable;           // texto de dano numerico: Rounded damage puede sumarle golpes
+        boolean mergeAlly;           // de que lado es (el color depende de ello)
         boolean hasKey;
         long fusionKey;
     }
@@ -630,6 +645,7 @@ public class DamageNumbersMod extends Mod {
                 Popup p = popups.get(i);
 
                 p.age += dt;
+                p.sinceSpawn += dt;
                 if (p.critEffect != FX_NONE) p.critAge += dt;
                 if (p.age >= p.lifetime) {
                     if (p.critEffect == FX_WET) detachWetBubbles(p);
@@ -825,6 +841,21 @@ public class DamageNumbersMod extends Mod {
                         "Status text fusion", "A status text (wet, freezing, tarred) plays its animation once per target and only appears again after the animation ends."));
                 table.pref(check(KEY_STATUS_FLOOD, true,
                         "Status flood", "When a unit is hit by a status effect, its status text will not appear again until the status ends and is applied again."));
+
+                // Widget "Optimization": agrupar y limitar los textos
+                table.pref(headerSetting("Optimization", OPTIMIZATION_ICON_SPRITE));
+                table.pref(check(KEY_ROUNDED_ENABLED, false,
+                        "Rounded damage", "Damage texts that appear within the range below are added into a single text. Without damage text fusion, only the hits within 0.2 seconds of the first text are added. With it, hits keep being added until the text ends."));
+                table.pref(slider(KEY_ROUNDED_RANGE, ROUNDED_RANGE_DEFAULT, ROUNDED_RANGE_MIN, ROUNDED_RANGE_MAX,
+                        "Rounded damage range", "Distance within which damage texts are added together, in world units (8 units are 1 block)."));
+                table.pref(check(KEY_LIMITER_ENABLED, false,
+                        "Texts limiter", "Limits how many floating texts can be alive at once. While the limit is reached, new texts do not appear until others disappear."));
+                table.pref(slider(KEY_LIMITER_MAX, LIMITER_DEFAULT, LIMITER_MIN, LIMITER_MAX,
+                        "Texts limit", "Maximum number of floating texts alive at the same time."));
+                table.pref(check(KEY_SHOW_STATUS, true,
+                        "Show status texts", "Shows the floating texts of altered statuses (Wet, Tarred, Freezing...). Turn it off to hide them."));
+                table.pref(check(KEY_SHOW_NULLED, true,
+                        "Show nulled texts", "Shows the floating texts of nulled hits, including bullets stopped by a shield. Turn it off to hide them."));
 
                 // Widget "Displacement effect": solo uno activo a la vez
                 table.pref(displacementSetting());
@@ -1028,6 +1059,29 @@ public class DamageNumbersMod extends Mod {
         return displacementMode().equals("scatter");
     }
 
+    private boolean showStatusTexts() {
+        return Core.settings.getBool(KEY_SHOW_STATUS, true);
+    }
+
+    private boolean showNulledTexts() {
+        return Core.settings.getBool(KEY_SHOW_NULLED, true);
+    }
+
+    private boolean roundedEnabled() {
+        return Core.settings.getBool(KEY_ROUNDED_ENABLED, false);
+    }
+
+    private float roundedRange() {
+        return Mathf.clamp(Core.settings.getInt(KEY_ROUNDED_RANGE, ROUNDED_RANGE_DEFAULT), ROUNDED_RANGE_MIN, ROUNDED_RANGE_MAX);
+    }
+
+    // Con "Texts limiter" activo, solo cabe un texto nuevo si hay menos vivos que el limite.
+    private boolean canSpawnText() {
+        if (!Core.settings.getBool(KEY_LIMITER_ENABLED, false)) return true;
+        int max = Mathf.clamp(Core.settings.getInt(KEY_LIMITER_MAX, LIMITER_DEFAULT), LIMITER_MIN, LIMITER_MAX);
+        return popups.size < max;
+    }
+
     private boolean damageFusion() {
         return !scatterActive() && Core.settings.getBool(KEY_DAMAGE_FUSION, false);
     }
@@ -1111,13 +1165,20 @@ public class DamageNumbersMod extends Mod {
 
     // Dano numerico. Con "Damage text fusion" el dano continuo sobre el mismo objetivo
     // se suma en un solo texto y la animacion se reinicia en cada golpe nuevo.
-    // Un golpe anulado ("nulled") nunca se fusiona.
+    // Con "Rounded damage" los golpes que caen cerca unos de otros (aunque sean de objetivos
+    // distintos) tambien se suman en un solo texto. Un golpe anulado ("nulled") nunca se suma.
+    // El "Texts limiter" solo frena los textos nuevos: sumar a uno que ya existe siempre se puede.
     private void showDamage(int targetId, int kind, float raw, float trueDamage, boolean isAlly,
                             BulletType type, float x, float y) {
         boolean nulledHit = !damageMode().equals("raw") && isNulled(trueDamage);
+        if (nulledHit && !showNulledTexts()) return; // "Show nulled texts" apagado
+        boolean fuse = damageFusion() && !nulledHit;
+        boolean round = roundedEnabled() && !nulledHit;
 
-        if (damageFusion() && !nulledHit) {
-            long key = fusionKey(targetId, kind, 0);
+        // 1) Fusion de dano: el mismo objetivo
+        long key = 0L;
+        if (fuse) {
+            key = fusionKey(targetId, kind, 0);
             Popup existing = fusionIndex.get(key);
 
             if (existing != null) {
@@ -1128,20 +1189,63 @@ public class DamageNumbersMod extends Mod {
                 applyCritical(existing, type);
                 return;
             }
+        }
 
-            Popup created = spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly),
-                    pickIcon(type, trueDamage), x, y);
-            created.sumRaw = raw;
-            created.sumTrue = trueDamage;
+        // 2) Rounded damage: el texto mas cercano dentro del rango
+        if (round) {
+            Popup near = findRoundedTarget(isAlly, x, y);
+            if (near != null) {
+                near.sumRaw += raw;
+                near.sumTrue += trueDamage;
+                String text = formatDamageText(near.sumRaw, near.sumTrue);
+                TextureRegion icon = pickIcon(type, near.sumTrue);
+                if (fuse) {
+                    // Con fusion no hay limite de ventana: la animacion se reinicia en cada golpe
+                    // y el texto sigue hasta que termina su tiempo de vida. Se queda donde nacio.
+                    layoutPopup(near, text, teamColor(isAlly), icon, near.anchorX, near.anchorY);
+                } else {
+                    // Sin fusion la ventana es de 0.2 s y el texto no reinicia su animacion
+                    retextPopup(near, text, icon);
+                }
+                applyCritical(near, type);
+                return;
+            }
+        }
+
+        // 3) Texto nuevo (si el limitador lo permite)
+        if (!canSpawnText()) return;
+
+        Popup created = spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly), pickIcon(type, trueDamage), x, y);
+        created.sumRaw = raw;
+        created.sumTrue = trueDamage;
+        created.mergeable = !nulledHit;
+        created.mergeAlly = isAlly;
+        if (fuse) {
             created.hasKey = true;
             created.fusionKey = key;
             fusionIndex.put(key, created);
-            applyCritical(created, type);
-            return;
         }
+        applyCritical(created, nulledHit ? null : type); // un golpe anulado no lleva efecto
+    }
 
-        Popup single = spawnPair(formatDamageText(raw, trueDamage), teamColor(isAlly), pickIcon(type, trueDamage), x, y);
-        applyCritical(single, nulledHit ? null : type); // un golpe anulado no lleva efecto
+    // Rounded damage: el texto de dano del mismo lado cuyo punto de nacimiento este mas cerca
+    // del golpe, dentro del rango. Sin fusion solo cuentan los textos que nacieron hace
+    // menos de 0.2 s; con fusion, cualquiera que siga vivo.
+    private Popup findRoundedTarget(boolean ally, float x, float y) {
+        boolean openWindow = damageFusion();
+        Popup best = null;
+        float bestDst = roundedRange();
+        for (int i = 0; i < popups.size; i++) {
+            Popup q = popups.get(i);
+            if (!q.mergeable || q.mergeAlly != ally) continue;
+            if (!openWindow && q.sinceSpawn > ROUNDED_WINDOW_SECONDS) continue;
+            float d = Mathf.dst(x, y, q.anchorX, q.anchorY);
+            if (d <= bestDst) {
+                bestDst = d;
+                best = q;
+            }
+        }
+        return best;
     }
 
     // Texto de estado (mojado/alquitranado/congelante).
@@ -1150,6 +1254,7 @@ public class DamageNumbersMod extends Mod {
     //  - "Status text fusion": mientras el texto del mismo estado siga animandose sobre la
     //    unidad, los golpes nuevos no crean otro; vuelve a aparecer cuando termina.
     private void showStatus(Unit unit, StatusEffect status, float x, float y) {
+        if (!showStatusTexts()) return; // "Show status texts" apagado
         boolean flood = statusFlood();
         long key = fusionKey(unit.id, KIND_STATUS, status.id);
 
@@ -1161,6 +1266,9 @@ public class DamageNumbersMod extends Mod {
 
         boolean fuse = statusFusion();
         if (fuse && fusionIndex.containsKey(key)) return;
+
+        // Si el limitador no deja, no se marca como anunciado: aparecera la proxima vez que se aplique
+        if (!canSpawnText()) return;
 
         Popup created = spawnPair(status.localizedName, statusColor(status), statusIcon(status), x, y);
         if (fuse) {
@@ -1201,6 +1309,7 @@ public class DamageNumbersMod extends Mod {
         // no es nuestro, el escudo que lo detuvo es nuestro (aliado).
         boolean isAlly = playerTeam != null && b.team != playerTeam;
 
+        if (!showNulledTexts() || !canSpawnText()) return;
         spawnPair(NULLED_TEXT, teamColor(isAlly), getCustomSprite(NULLED_SPRITE), b.x, b.y);
     }
 
@@ -1247,6 +1356,24 @@ public class DamageNumbersMod extends Mod {
                 + (p.fadeIn ? FADE_IN_SECONDS : 0f)
                 + (p.fadeOut ? FADE_OUT_SECONDS : 0f);
 
+        measureText(p);
+
+        if (p.icon != null) {
+            float gap = halfSpacing();
+            p.textDx = gap + p.textWidth / 2f;
+            p.iconDx = -gap - iconSizeOf(p) / 2f;
+        } else {
+            p.textDx = 0f;
+            p.iconDx = 0f;
+        }
+    }
+
+    // Cambia el texto y el icono de un popup sin reiniciar su animacion ni su tiempo de vida
+    // (Rounded damage sin fusion: el texto sigue su camino con el dano ya sumado).
+    private void retextPopup(Popup p, String text, TextureRegion icon) {
+        p.text = text;
+        p.icon = iconDisplay() ? icon : null;
+        p.charStrings = null; // el texto cambio: se vuelve a medir letra por letra
         measureText(p);
 
         if (p.icon != null) {
